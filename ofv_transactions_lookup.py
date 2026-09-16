@@ -44,7 +44,13 @@ API_KEY = "SKRIV_INN_DIN_API_NOKKEL_HER"
 # ---------------------------------------------------------------------
 # 2) Inn- og utfil
 # ---------------------------------------------------------------------
+# FOR TEST: skriv inn regnr/VIN direkte her, med komma mellom hvert.
+# F.eks: TEST_IDENTIFIERS = "EE96644, AB12345, YV1UZA8VCN1234567"
+# Sa lenge denne IKKE er tom, brukes den i stedet for INPUT_FILE nedenfor.
+TEST_IDENTIFIERS = ""
+
 # Filen du vil laste opp. Kan vaere .csv, .xlsx eller .xls.
+# (Brukes bare nar TEST_IDENTIFIERS ovenfor er tom.)
 INPUT_FILE = "input.xlsx"
 
 # Navnet pa kolonnen som inneholder VIN/regnr. Sett til None for at
@@ -234,24 +240,31 @@ def main() -> None:
         print("PERIOD_FROM/PERIOD_TO ma vaere pa formatet DD.MM.YYYY, f.eks. 20.12.2026.")
         sys.exit(1)
 
-    try:
-        df = read_input_file()
-    except FileNotFoundError:
-        print(f"Fant ikke inputfilen '{INPUT_FILE}'. Sjekk INPUT_FILE i toppen av scriptet.")
-        sys.exit(1)
+    if TEST_IDENTIFIERS.strip():
+        identifiers = [v.strip() for v in TEST_IDENTIFIERS.split(",") if v.strip()]
+        if not identifiers:
+            print("TEST_IDENTIFIERS er fylt ut, men inneholder ingen gyldige verdier.")
+            sys.exit(1)
+        print(f"Bruker {len(identifiers)} regnr/VIN fra TEST_IDENTIFIERS. Starter oppslag...")
+    else:
+        try:
+            df = read_input_file()
+        except FileNotFoundError:
+            print(f"Fant ikke inputfilen '{INPUT_FILE}'. Sjekk INPUT_FILE i toppen av scriptet.")
+            sys.exit(1)
 
-    if df.empty:
-        print(f"Inputfilen '{INPUT_FILE}' er tom.")
-        sys.exit(1)
+        if df.empty:
+            print(f"Inputfilen '{INPUT_FILE}' er tom.")
+            sys.exit(1)
 
-    id_column = detect_input_column(df)
-    identifiers = [str(v).strip() for v in df[id_column].dropna().tolist() if str(v).strip()]
+        id_column = detect_input_column(df)
+        identifiers = [str(v).strip() for v in df[id_column].dropna().tolist() if str(v).strip()]
 
-    if not identifiers:
-        print(f"Fant ingen verdier i kolonnen '{id_column}'.")
-        sys.exit(1)
+        if not identifiers:
+            print(f"Fant ingen verdier i kolonnen '{id_column}'.")
+            sys.exit(1)
 
-    print(f"Fant {len(identifiers)} kjoretoy i kolonnen '{id_column}'. Starter oppslag...")
+        print(f"Fant {len(identifiers)} kjoretoy i kolonnen '{id_column}'. Starter oppslag...")
 
     session = requests.Session()
     session.headers.update({
