@@ -28,7 +28,7 @@ Hvordan bruke det?
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import date, datetime
 
 import openpyxl
 import pandas as pd
@@ -93,12 +93,14 @@ def ddmmyyyy_to_iso(date_str: str) -> str:
     return parsed.strftime("%Y-%m-%d")
 
 
-def iso_to_ddmmyyyy(date_str):
-    """Konverterer en API-dato (YYYY-MM-DD...) til DDMMAAAA for output."""
+def parse_api_date(date_str):
+    """Konverterer en API-dato (YYYY-MM-DD...) til et ekte dato-objekt, slik
+    at Excel viser/sorterer den som en dato (formatert DD.MM.AAAA) i stedet
+    for en tekststreng eller et tall uten ledende nuller."""
     if not date_str:
         return None
     try:
-        return datetime.strptime(str(date_str)[:10], "%Y-%m-%d").strftime("%d%m%Y")
+        return datetime.strptime(str(date_str)[:10], "%Y-%m-%d").date()
     except ValueError:
         return date_str
 
@@ -140,14 +142,18 @@ def read_input_file() -> pd.DataFrame:
 
 def write_results_to_excel(results: list, path: str) -> None:
     """Skriver rett med openpyxl (ikke pandas.to_excel), fordi pandas sin
-    Excel-skriver konverterer tallaktige tekststrenger (f.eks. datoer i
-    DDMMAAAA-format) til tall og fjerner ledende nuller."""
+    Excel-skriver konverterer tallaktige tekststrenger til tall og fjerner
+    ledende nuller. Dato-celler far et ekte dato-objekt med format
+    DD.MM.AAAA, slik at Excel kan sortere/filtrere pa dem som datoer."""
     columns = list(results[0].keys()) if results else []
     workbook = openpyxl.Workbook()
     sheet = workbook.active
     sheet.append(columns)
-    for row in results:
+    for row_index, row in enumerate(results, start=2):
         sheet.append([row.get(col) for col in columns])
+        for col_index, col in enumerate(columns, start=1):
+            if isinstance(row.get(col), date):
+                sheet.cell(row=row_index, column=col_index).number_format = "DD.MM.YYYY"
     workbook.save(path)
 
 
@@ -208,7 +214,7 @@ def build_empty_result(identifier: str, id_filter: dict, period_active: bool) ->
         "fuelGroup": None,
         "isLeased": None,
         "isUsedImported": None,
-        # --- datoer (format DDMMAAAA) ---
+        # --- datoer (ekte Excel-dato, vises som DD.MM.AAAA) ---
         "forstegangsRegistreringsdato": None,
         "sisteEierskifteDato": None,
         # --- selger (from) ---
@@ -217,9 +223,6 @@ def build_empty_result(identifier: str, id_filter: dict, period_active: bool) ->
         "from_owner_countyName": None,
         "from_owner_municipalityName": None,
         "from_user_countyName": None,
-        "from_user_municipalityName": None,
-        "from_leaseHolder_countyName": None,
-        "from_leaseHolder_municipalityName": None,
         # --- kjoper (to) ---
         "to_owner_type": None,
         "to_owner_companyName": None,
@@ -271,7 +274,6 @@ def lookup_vehicle(
         to_side = latest.get("to") or {}
         from_owner = from_side.get("owner") or {}
         from_user = from_side.get("user") or {}
-        from_lease = from_side.get("leaseHolder") or {}
         to_owner = to_side.get("owner") or {}
 
         result["regNo"] = latest.get("regNo")
@@ -284,17 +286,14 @@ def lookup_vehicle(
         result["isLeased"] = latest.get("isLeased")
         result["isUsedImported"] = latest.get("isUsedImported")
 
-        result["forstegangsRegistreringsdato"] = iso_to_ddmmyyyy(latest.get("firstRegistrationDate"))
-        result["sisteEierskifteDato"] = iso_to_ddmmyyyy(latest.get("transactionDate"))
+        result["forstegangsRegistreringsdato"] = parse_api_date(latest.get("firstRegistrationDate"))
+        result["sisteEierskifteDato"] = parse_api_date(latest.get("transactionDate"))
 
         result["from_owner_type"] = from_owner.get("type")
         result["from_owner_companyName"] = company_name(from_owner)
         result["from_owner_countyName"] = party_county(from_owner)
         result["from_owner_municipalityName"] = party_municipality(from_owner)
         result["from_user_countyName"] = party_county(from_user)
-        result["from_user_municipalityName"] = party_municipality(from_user)
-        result["from_leaseHolder_countyName"] = party_county(from_lease)
-        result["from_leaseHolder_municipalityName"] = party_municipality(from_lease)
 
         result["to_owner_type"] = to_owner.get("type")
         result["to_owner_companyName"] = company_name(to_owner)
@@ -312,7 +311,7 @@ def lookup_vehicle(
             period_data = post_with_retries(session, period_payload)
             period_transactions = period_data.get("transactions", [])
             if period_transactions:
-                result["sisteEierskifteIPeriode"] = iso_to_ddmmyyyy(
+                result["sisteEierskifteIPeriode"] = parse_api_date(
                     period_transactions[0].get("transactionDate")
                 )
             else:
