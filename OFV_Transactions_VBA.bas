@@ -7,13 +7,14 @@ Option Explicit
 '
 ' Portert fra ofv_transactions_lookup.py, i samme stil som den
 ' eksisterende Vegvesenet-makroen (CreateObject-basert HTTP, ingen
-' faste VBA-referanser, Dictionary for oppslag, tabell som datakilde).
+' faste VBA-referanser, Dictionary for oppslag).
 '
 ' Hva gjor den?
 ' -------------
-' Leser Regnr/VIN fra en Excel-tabell, slar opp hvert unike kjoretoy mot
-' OFV sitt Transactions-API, og skriver kjoretoydata, eierskiftedatoer
-' og selger-/kjoperinfo tilbake i tabellen.
+' Leser Regnr fra kolonne B (fra rad FIRST_ROW og nedover) og VIN fra
+' kolonne C (samme rader), slar opp hvert unike kjoretoy mot OFV sitt
+' Transactions-API, og skriver kjoretoydata, eierskiftedatoer og
+' selger-/kjoperinfo fra kolonne D og til hoyre, rad for rad.
 '
 ' Forutsetninger i arbeidsboken:
 ' - Et navngitt omrade "OFV_API" (Formler > Navnebehandling) som
@@ -21,9 +22,10 @@ Option Explicit
 ' - (Valgfritt) to navngitte omrader "OFV_PeriodFra" og "OFV_PeriodTil"
 '   som peker til to celler formatert som dato. La cellene sta tomme for
 '   a IKKE bruke periodefilteret.
-' - En Excel-tabell (Sett inn > Tabell) med navnet angitt i TABLE_NAME
-'   nedenfor, med kolonneoverskrifter som listet i konstantene under
-'   "Kolonneoverskrifter". Se veiledningen for full liste.
+' - Regnr i kolonne B fra rad 5 og nedover, VIN i kolonne C fra rad 5 og
+'   nedover (juster COL_REGNR/COL_VIN/FIRST_ROW nedenfor ved behov).
+'   Utdata skrives fra kolonne D og til hoyre, pa samme rad. Rad 4
+'   (FIRST_ROW - 1) far automatisk overskrifter for utdata-kolonnene.
 ' =====================================================================
 
 #If VBA7 Then
@@ -35,16 +37,18 @@ Option Explicit
 ' ---------------------------------------------------------------------
 ' Konfigurasjon
 ' ---------------------------------------------------------------------
-Private Const TABLE_NAME As String = "tblOFV"
+Private Const SHEET_NAME As String = ""       ' Tomt = bruk aktivt ark nar makroen kjores
+Private Const FIRST_ROW As Long = 5           ' forste datarad
+Private Const COL_REGNR As Long = 2           ' B - input
+Private Const COL_VIN As Long = 3             ' C - input
+Private Const OUTPUT_FIRST_COL As Long = 4    ' D - forste utkolonne, resten fylles til hoyre
+
 Private Const OFV_BASE_URL As String = "https://api.ofv.no/transactions/v1/"
 Private Const OFV_MAX_RETRIES As Long = 4
 Private Const OFV_RETRY_WAIT_MS As Long = 3000
 Private Const OFV_PAUSE_MS As Long = 200
 
-' Kolonneoverskrifter - ma finnes i tabellen TABLE_NAME (rekkefolge er
-' likegyldig, det er kun overskriftsteksten som brukes til oppslag).
-Private Const COL_REGNR As String = "Regnr"                          ' input
-Private Const COL_VIN As String = "VIN"                              ' input
+' Overskriftstekster for utdata-kolonnene (skrives til rad FIRST_ROW - 1).
 Private Const COL_KILDE As String = "Kilde"
 Private Const COL_REGNO As String = "RegNo"
 Private Const COL_CHASSIS As String = "Chassisnummer"
@@ -71,17 +75,17 @@ Private Const COL_STATUS As String = "Status"
 ' HOVEDMAKRO - kjor denne (Alt+F8, eller koble til en knapp)
 ' =====================================================================
 Public Sub OFV_RefreshInfo()
-    Dim loTable As ListObject
-    Set loTable = OFV_GetTable(TABLE_NAME)
-    If loTable Is Nothing Then
-        MsgBox "Fant ikke tabellen '" & TABLE_NAME & "'. Opprett en Excel-tabell med" & _
-               " dette navnet (Sett inn > Tabell), eller endre TABLE_NAME i toppen av modulen.", _
-               vbExclamation, "OFV"
-        Exit Sub
-    End If
-    If loTable.DataBodyRange Is Nothing Then
-        MsgBox "Tabellen '" & TABLE_NAME & "' har ingen datarader.", vbInformation, "OFV"
-        Exit Sub
+    Dim wsData As Worksheet
+    If Len(SHEET_NAME) > 0 Then
+        On Error Resume Next
+        Set wsData = ThisWorkbook.Worksheets(SHEET_NAME)
+        On Error GoTo 0
+        If wsData Is Nothing Then
+            MsgBox "Fant ikke arket '" & SHEET_NAME & "'.", vbExclamation, "OFV"
+            Exit Sub
+        End If
+    Else
+        Set wsData = ActiveSheet
     End If
 
     Dim strApiKey As String
@@ -94,20 +98,6 @@ Public Sub OFV_RefreshInfo()
         Exit Sub
     End If
 
-    ' kolonne-indekser (header-navn -> kolonnenummer i tabellen)
-    Dim objCol As Object
-    Set objCol = CreateObject("Scripting.Dictionary")
-    objCol.CompareMode = vbTextCompare
-    Dim c As Long
-    For c = 1 To loTable.ListColumns.Count
-        objCol(Trim$(loTable.ListColumns(c).Name)) = c
-    Next c
-
-    If Not objCol.Exists(COL_REGNR) Or Not objCol.Exists(COL_VIN) Then
-        MsgBox "Tabellen ma ha kolonnene '" & COL_REGNR & "' og '" & COL_VIN & "'.", vbExclamation, "OFV"
-        Exit Sub
-    End If
-
     ' periode (valgfritt) - to navngitte celler formatert som dato
     Dim datPeriodFra As Variant, datPeriodTil As Variant, blnPeriodActive As Boolean
     On Error Resume Next
@@ -116,15 +106,26 @@ Public Sub OFV_RefreshInfo()
     On Error GoTo 0
     blnPeriodActive = (IsDate(datPeriodFra) And IsDate(datPeriodTil))
 
-    ' hent data fra tabellen til et array
-    Dim varData As Variant
-    varData = loTable.DataBodyRange.Value
-    If Not IsArray(varData) Then
-        ' tabellen har bare 1 datarad - Excel gir da ikke et array. Bygg et selv.
-        ReDim varData(1 To 1, 1 To loTable.ListColumns.Count)
-        For c = 1 To loTable.ListColumns.Count
-            varData(1, c) = loTable.DataBodyRange.Cells(1, c).Value
-        Next c
+    ' finn siste datarad (lengste av Regnr- og VIN-kolonnen)
+    Dim lngLastRowB As Long, lngLastRowC As Long, lngLastRow As Long
+    lngLastRowB = wsData.Cells(wsData.Rows.Count, COL_REGNR).End(xlUp).Row
+    lngLastRowC = wsData.Cells(wsData.Rows.Count, COL_VIN).End(xlUp).Row
+    lngLastRow = lngLastRowB
+    If lngLastRowC > lngLastRow Then lngLastRow = lngLastRowC
+    If lngLastRow < FIRST_ROW Then
+        MsgBox "Fant ingen Regnr eller VIN fra rad " & FIRST_ROW & " og nedover.", vbInformation, "OFV"
+        Exit Sub
+    End If
+
+    Dim objFieldMap As Variant
+    objFieldMap = OFV_GetFieldMap()
+    Dim m As Long
+
+    ' skriv overskrifter for utdata-kolonnene (rad over forste datarad)
+    If FIRST_ROW > 1 Then
+        For m = LBound(objFieldMap) To UBound(objFieldMap)
+            wsData.Cells(FIRST_ROW - 1, OUTPUT_FIRST_COL + m).Value = objFieldMap(m)(1)
+        Next m
     End If
 
     ' bygg liste over unike kjoretoy (Regnr eller VIN, VIN har forrang)
@@ -133,9 +134,9 @@ Public Sub OFV_RefreshInfo()
     objQueue.CompareMode = vbTextCompare
 
     Dim r As Long, strVin As String, strReg As String, strKey As String
-    For r = 1 To UBound(varData, 1)
-        strVin = Trim$(Replace(CStr(varData(r, objCol(COL_VIN)) & vbNullString), " ", vbNullString))
-        strReg = Trim$(Replace(CStr(varData(r, objCol(COL_REGNR)) & vbNullString), " ", vbNullString))
+    For r = FIRST_ROW To lngLastRow
+        strVin = Trim$(Replace(CStr(wsData.Cells(r, COL_VIN).Value & vbNullString), " ", vbNullString))
+        strReg = Trim$(Replace(CStr(wsData.Cells(r, COL_REGNR).Value & vbNullString), " ", vbNullString))
         strKey = OFV_BuildKey(strVin, strReg)
         If Len(strKey) > 0 Then
             If Not objQueue.Exists(strKey) Then objQueue.Add strKey, strKey
@@ -143,7 +144,7 @@ Public Sub OFV_RefreshInfo()
     Next r
 
     If objQueue.Count = 0 Then
-        MsgBox "Fant ingen Regnr eller VIN i tabellen.", vbInformation, "OFV"
+        MsgBox "Fant ingen Regnr eller VIN fra rad " & FIRST_ROW & " og nedover.", vbInformation, "OFV"
         Exit Sub
     End If
 
@@ -176,45 +177,31 @@ Public Sub OFV_RefreshInfo()
         Sleep OFV_PAUSE_MS
     Next varKey
 
-    ' skriv resultatene tilbake i arrayet
-    Dim objFieldMap As Variant
-    objFieldMap = OFV_GetFieldMap()
-
-    For r = 1 To UBound(varData, 1)
-        strVin = Trim$(Replace(CStr(varData(r, objCol(COL_VIN)) & vbNullString), " ", vbNullString))
-        strReg = Trim$(Replace(CStr(varData(r, objCol(COL_REGNR)) & vbNullString), " ", vbNullString))
+    ' skriv resultatene tilbake, rad for rad
+    Dim strDictKey As String
+    For r = FIRST_ROW To lngLastRow
+        strVin = Trim$(Replace(CStr(wsData.Cells(r, COL_VIN).Value & vbNullString), " ", vbNullString))
+        strReg = Trim$(Replace(CStr(wsData.Cells(r, COL_REGNR).Value & vbNullString), " ", vbNullString))
         strKey = OFV_BuildKey(strVin, strReg)
         If Len(strKey) > 0 Then
             If objResults.Exists(strKey) Then
                 Dim objF As Object
                 Set objF = objResults(strKey)
-
-                Dim m As Long, strDictKey As String, strColHeader As String
                 For m = LBound(objFieldMap) To UBound(objFieldMap)
                     strDictKey = objFieldMap(m)(0)
-                    strColHeader = objFieldMap(m)(1)
-                    If objCol.Exists(strColHeader) Then
-                        If objF.Exists(strDictKey) Then
-                            ' dato-kolonner far ekte Date-verdier fra OFV_DateFromISO,
-                            ' eller en feiltekst/"Ingen eierskifte i perioden" - begge
-                            ' skrives rett inn, Variant-tildelingen haandterer begge typer.
-                            varData(r, objCol(strColHeader)) = objF(strDictKey)
-                        End If
+                    If objF.Exists(strDictKey) Then
+                        wsData.Cells(r, OUTPUT_FIRST_COL + m).Value = objF(strDictKey)
                     End If
                 Next m
             End If
         End If
     Next r
 
-    loTable.DataBodyRange.Value = varData
-
     ' formater dato-kolonnene (3. element i objFieldMap) som ekte datoer (DD.MM.AAAA)
     For m = LBound(objFieldMap) To UBound(objFieldMap)
         If objFieldMap(m)(2) = True Then
-            strColHeader = objFieldMap(m)(1)
-            If objCol.Exists(strColHeader) Then
-                loTable.ListColumns(strColHeader).DataBodyRange.NumberFormat = "dd.mm.yyyy"
-            End If
+            wsData.Range(wsData.Cells(FIRST_ROW, OUTPUT_FIRST_COL + m), _
+                         wsData.Cells(lngLastRow, OUTPUT_FIRST_COL + m)).NumberFormat = "dd.mm.yyyy"
         End If
     Next m
 
@@ -260,7 +247,8 @@ Private Function OFV_GetFieldMap() As Variant
         Array("FromUserCounty", COL_SELGER_BRUKER_FYLKE, False), _
         Array("ToOwnerType", COL_KJOPER_TYPE, False), _
         Array("ToOwnerCompanyName", COL_KJOPER_FIRMA, False), _
-        Array("PeriodTransactionDate", COL_PERIODE, True) _
+        Array("PeriodTransactionDate", COL_PERIODE, True), _
+        Array(COL_STATUS, COL_STATUS, False) _
     )
 End Function
 
@@ -433,19 +421,6 @@ Private Function OFV_DateFromISO(strISO As String) As Variant
     Exit Function
 Feil:
     OFV_DateFromISO = Null
-End Function
-
-
-Private Function OFV_GetTable(strName As String) As ListObject
-    Dim ws As Worksheet, lo As ListObject
-    For Each ws In ThisWorkbook.Worksheets
-        For Each lo In ws.ListObjects
-            If StrComp(lo.Name, strName, vbTextCompare) = 0 Then
-                Set OFV_GetTable = lo
-                Exit Function
-            End If
-        Next lo
-    Next ws
 End Function
 
 
