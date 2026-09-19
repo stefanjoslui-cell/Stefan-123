@@ -124,13 +124,10 @@ Public Sub OFV_RefreshInfo()
     objFieldMap = OFV_GetFieldMap()
     Dim m As Long
 
-    ' tom resultatarket (behold ev. tidligere innhold under overskriftene,
-    ' men fjern det siden radantallet varierer fra kjoring til kjoring)
-    Dim lngResultLastRow As Long
-    lngResultLastRow = wsResult.Cells(wsResult.Rows.Count, 1).End(xlUp).Row
-    If lngResultLastRow > 1 Then
-        wsResult.Range(wsResult.Cells(2, 1), wsResult.Cells(lngResultLastRow, UBound(objFieldMap) + 1)).ClearContents
-    End If
+    ' tom hele det brukte omradet pa resultatarket (ogsa evt. gamle
+    ' kolonner utenfor dagens feltliste, f.eks. etter en oppdatering av
+    ' scriptet som fjerner kolonner) for a unnga liggende gamle data
+    wsResult.Cells.ClearContents
 
     For m = LBound(objFieldMap) To UBound(objFieldMap)
         wsResult.Cells(1, m + 1).Value = objFieldMap(m)(1)
@@ -219,8 +216,6 @@ Private Function OFV_GetFieldMap() As Variant
         Array("FromOwnerType", "SelgerEierType", False), _
         Array("FromOwnerCompanyName", "SelgerEierFirma", False), _
         Array("FromOwnerCounty", "SelgerEierFylke", False), _
-        Array("FromOwnerMunicipality", "SelgerEierKommune", False), _
-        Array("FromUserCounty", "SelgerBrukerFylke", False), _
         Array("ToOwnerType", "KjoperEierType", False), _
         Array("ToOwnerCompanyName", "KjoperEierFirma", False), _
         Array("Status", "Status", False) _
@@ -344,19 +339,16 @@ Private Function OFV_BuildFieldsFromTransaction(strIdentifier As String, strTxnJ
     objFields("TransactionDate") = OFV_DateFromISO(CStr(JSON_ExtractValue(strTxnJson, "transactionDate") & vbNullString))
 
     Dim strFromObj As String, strToObj As String
-    Dim strFromOwner As String, strFromUser As String, strToOwner As String, strCompanyObj As String
+    Dim strFromOwner As String, strToOwner As String, strCompanyObj As String
     strFromObj = JSON_ExtractObject(strTxnJson, "from")
     strToObj = JSON_ExtractObject(strTxnJson, "to")
     strFromOwner = JSON_ExtractObject(strFromObj, "owner")
-    strFromUser = JSON_ExtractObject(strFromObj, "user")
     strToOwner = JSON_ExtractObject(strToObj, "owner")
 
     objFields("FromOwnerType") = JSON_ExtractValue(strFromOwner, "type")
     strCompanyObj = JSON_ExtractObject(strFromOwner, "companyInfo")
     objFields("FromOwnerCompanyName") = JSON_ExtractValue(strCompanyObj, "name")
     objFields("FromOwnerCounty") = JSON_ExtractValue(strFromOwner, "countyName")
-    objFields("FromOwnerMunicipality") = JSON_ExtractValue(strFromOwner, "municipalityName")
-    objFields("FromUserCounty") = JSON_ExtractValue(strFromUser, "countyName")
 
     objFields("ToOwnerType") = JSON_ExtractValue(strToOwner, "type")
     strCompanyObj = JSON_ExtractObject(strToOwner, "companyInfo")

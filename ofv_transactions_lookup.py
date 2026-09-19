@@ -96,7 +96,6 @@ ROW_TEMPLATE_KEYS = [
     "registrationType", "fuelGroup", "isLeased", "isUsedImported",
     "forstegangsRegistreringsdato", "transactionNumber", "eierskifteDato",
     "from_owner_type", "from_owner_companyName", "from_owner_countyName",
-    "from_owner_municipalityName", "from_user_countyName",
     "to_owner_type", "to_owner_companyName", "status",
 ]
 
@@ -225,10 +224,6 @@ def party_county(party):
     return (party or {}).get("countyName")
 
 
-def party_municipality(party):
-    return (party or {}).get("municipalityName")
-
-
 def company_name(party):
     return ((party or {}).get("companyInfo") or {}).get("name")
 
@@ -237,7 +232,6 @@ def build_row_from_transaction(identifier: str, id_filter: dict, transaction: di
     from_side = transaction.get("from") or {}
     to_side = transaction.get("to") or {}
     from_owner = from_side.get("owner") or {}
-    from_user = from_side.get("user") or {}
     to_owner = to_side.get("owner") or {}
 
     row = empty_row(identifier, id_filter, "OK")
@@ -255,8 +249,6 @@ def build_row_from_transaction(identifier: str, id_filter: dict, transaction: di
     row["from_owner_type"] = from_owner.get("type")
     row["from_owner_companyName"] = company_name(from_owner)
     row["from_owner_countyName"] = party_county(from_owner)
-    row["from_owner_municipalityName"] = party_municipality(from_owner)
-    row["from_user_countyName"] = party_county(from_user)
     row["to_owner_type"] = to_owner.get("type")
     row["to_owner_companyName"] = company_name(to_owner)
     return row
