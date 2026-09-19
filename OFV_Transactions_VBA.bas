@@ -283,9 +283,19 @@ Private Function OFV_FetchAllTransactionRows(strApiKey As String, strIdentifier 
         varHasNext = JSON_ExtractValue(strPaginationObj, "hasNextPage")
         varCursor = JSON_ExtractValue(strPaginationObj, "endCursor")
 
+        ' CBool feiler med "Type mismatch" hvis varHasNext er noe annet enn
+        ' en ren Boolean/tallverdi (f.eks. en tom streng) - sjekk typen
+        ' eksplisitt i stedet, slik at dette aldri kan krasje makroen.
         Dim blnHasNext As Boolean
         blnHasNext = False
-        If Not IsNull(varHasNext) Then blnHasNext = CBool(varHasNext)
+        Select Case VarType(varHasNext)
+            Case vbBoolean
+                blnHasNext = varHasNext
+            Case vbString
+                blnHasNext = (StrComp(CStr(varHasNext), "true", vbTextCompare) = 0)
+            Case vbInteger, vbLong, vbSingle, vbDouble, vbCurrency
+                blnHasNext = (varHasNext <> 0)
+        End Select
 
         If blnHasNext And Len(CStr(varCursor & vbNullString)) > 0 Then
             strCursor = CStr(varCursor)
