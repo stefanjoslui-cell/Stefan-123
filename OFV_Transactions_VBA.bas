@@ -3,29 +3,25 @@ Option Explicit
 
 ' =====================================================================
 ' OFV Transactions API - Excel VBA-versjon
-' updated 2026-09-18
+' updated 2026-09-19
 '
-' Portert fra ofv_transactions_lookup.py, i samme stil som den
-' eksisterende Vegvesenet-makroen (CreateObject-basert HTTP, ingen
-' faste VBA-referanser, Dictionary for oppslag).
+' Portert fra ofv_transactions_lookup.py (samme funksjonalitet: for
+' hvert kjoretoy hentes ALLE registreringer/eierskifter som faller inn
+' i et datointervall, og hver registrering blir sin egen rad i
+' resultatet - ikke bare den siste).
 '
-' Hva gjor den?
-' -------------
-' Leser Regnr fra kolonne B (fra rad FIRST_ROW og nedover) og VIN fra
-' kolonne C (samme rader), slar opp hvert unike kjoretoy mot OFV sitt
-' Transactions-API, og skriver kjoretoydata, eierskiftedatoer og
-' selger-/kjoperinfo fra kolonne D og til hoyre, rad for rad.
+' Forutsetter to ark i arbeidsboken:
+'   "Input"    - API-nokkel, fra-/til-dato, og Regnr/VIN-listen
+'   "Resultat" - tomt ark som fylles ut av makroen for hver kjoring
 '
-' Forutsetninger i arbeidsboken:
-' - Et navngitt omrade "OFV_API" (Formler > Navnebehandling) som
-'   inneholder API-nokkelen (allerede satt opp).
-' - (Valgfritt) to navngitte omrader "OFV_PeriodFra" og "OFV_PeriodTil"
-'   som peker til to celler formatert som dato. La cellene sta tomme for
-'   a IKKE bruke periodefilteret.
-' - Regnr i kolonne B fra rad 5 og nedover, VIN i kolonne C fra rad 5 og
-'   nedover (juster COL_REGNR/COL_VIN/FIRST_ROW nedenfor ved behov).
-'   Utdata skrives fra kolonne D og til hoyre, pa samme rad. Rad 4
-'   (FIRST_ROW - 1) far automatisk overskrifter for utdata-kolonnene.
+' Navngitte omrader (Formler > Navnebehandling), pa arket "Input":
+'   OFV_API       - cellen med API-nokkelen
+'   OFV_DateFrom  - cellen med fra-dato (formatert som dato)
+'   OFV_DateTo    - cellen med til-dato (formatert som dato)
+'
+' Regnr star i kolonne B fra rad FIRST_ROW og nedover, VIN i kolonne C
+' (samme rader). En rad kan ha enten Regnr eller VIN - har den begge,
+' brukes VIN. Utdata skrives til arket "Resultat", en rad per treff.
 ' =====================================================================
 
 #If VBA7 Then
@@ -37,55 +33,31 @@ Option Explicit
 ' ---------------------------------------------------------------------
 ' Konfigurasjon
 ' ---------------------------------------------------------------------
-Private Const SHEET_NAME As String = ""       ' Tomt = bruk aktivt ark nar makroen kjores
-Private Const FIRST_ROW As Long = 5           ' forste datarad
+Private Const INPUT_SHEET As String = "Input"
+Private Const RESULT_SHEET As String = "Resultat"
+Private Const FIRST_ROW As Long = 5           ' forste datarad pa Input-arket
 Private Const COL_REGNR As Long = 2           ' B - input
 Private Const COL_VIN As Long = 3             ' C - input
-Private Const OUTPUT_FIRST_COL As Long = 4    ' D - forste utkolonne, resten fylles til hoyre
 
 Private Const OFV_BASE_URL As String = "https://api.ofv.no/transactions/v1/"
 Private Const OFV_MAX_RETRIES As Long = 4
 Private Const OFV_RETRY_WAIT_MS As Long = 3000
-Private Const OFV_PAUSE_MS As Long = 200
-
-' Overskriftstekster for utdata-kolonnene (skrives til rad FIRST_ROW - 1).
-Private Const COL_KILDE As String = "Kilde"
-Private Const COL_REGNO As String = "RegNo"
-Private Const COL_CHASSIS As String = "Chassisnummer"
-Private Const COL_MAKE As String = "Merke"
-Private Const COL_MODEL As String = "Modell"
-Private Const COL_REGTYPE As String = "RegistreringsType"
-Private Const COL_FUEL As String = "Drivstoffgruppe"
-Private Const COL_LEASED As String = "Leaset"
-Private Const COL_USEDIMPORT As String = "Bruktimportert"
-Private Const COL_FIRSTREG As String = "ForstegangsRegistrering"
-Private Const COL_LASTTRANS As String = "SisteEierskifte"
-Private Const COL_SELGER_TYPE As String = "SelgerEierType"
-Private Const COL_SELGER_FIRMA As String = "SelgerEierFirma"
-Private Const COL_SELGER_FYLKE As String = "SelgerEierFylke"
-Private Const COL_SELGER_KOMMUNE As String = "SelgerEierKommune"
-Private Const COL_SELGER_BRUKER_FYLKE As String = "SelgerBrukerFylke"
-Private Const COL_KJOPER_TYPE As String = "KjoperEierType"
-Private Const COL_KJOPER_FIRMA As String = "KjoperEierFirma"
-Private Const COL_PERIODE As String = "SisteEierskifteIPeriode"
-Private Const COL_STATUS As String = "Status"
+Private Const OFV_PAUSE_MS As Long = 150
+Private Const OFV_SORT_DIRECTION As String = "ASC"  ' ASC = eldste forst, DESC = nyeste forst
 
 
 ' =====================================================================
 ' HOVEDMAKRO - kjor denne (Alt+F8, eller koble til en knapp)
 ' =====================================================================
 Public Sub OFV_RefreshInfo()
-    Dim wsData As Worksheet
-    If Len(SHEET_NAME) > 0 Then
-        On Error Resume Next
-        Set wsData = ThisWorkbook.Worksheets(SHEET_NAME)
-        On Error GoTo 0
-        If wsData Is Nothing Then
-            MsgBox "Fant ikke arket '" & SHEET_NAME & "'.", vbExclamation, "OFV"
-            Exit Sub
-        End If
-    Else
-        Set wsData = ActiveSheet
+    Dim wsInput As Worksheet, wsResult As Worksheet
+    On Error Resume Next
+    Set wsInput = ThisWorkbook.Worksheets(INPUT_SHEET)
+    Set wsResult = ThisWorkbook.Worksheets(RESULT_SHEET)
+    On Error GoTo 0
+    If wsInput Is Nothing Or wsResult Is Nothing Then
+        MsgBox "Fant ikke arkene '" & INPUT_SHEET & "' og/eller '" & RESULT_SHEET & "'.", vbExclamation, "OFV"
+        Exit Sub
     End If
 
     Dim strApiKey As String
@@ -98,34 +70,31 @@ Public Sub OFV_RefreshInfo()
         Exit Sub
     End If
 
-    ' periode (valgfritt) - to navngitte celler formatert som dato
-    Dim datPeriodFra As Variant, datPeriodTil As Variant, blnPeriodActive As Boolean
+    Dim datFrom As Variant, datTo As Variant
     On Error Resume Next
-    datPeriodFra = ThisWorkbook.Names("OFV_PeriodFra").RefersToRange.Value
-    datPeriodTil = ThisWorkbook.Names("OFV_PeriodTil").RefersToRange.Value
+    datFrom = ThisWorkbook.Names("OFV_DateFrom").RefersToRange.Value
+    datTo = ThisWorkbook.Names("OFV_DateTo").RefersToRange.Value
     On Error GoTo 0
-    blnPeriodActive = (IsDate(datPeriodFra) And IsDate(datPeriodTil))
-
-    ' finn siste datarad (lengste av Regnr- og VIN-kolonnen)
-    Dim lngLastRowB As Long, lngLastRowC As Long, lngLastRow As Long
-    lngLastRowB = wsData.Cells(wsData.Rows.Count, COL_REGNR).End(xlUp).Row
-    lngLastRowC = wsData.Cells(wsData.Rows.Count, COL_VIN).End(xlUp).Row
-    lngLastRow = lngLastRowB
-    If lngLastRowC > lngLastRow Then lngLastRow = lngLastRowC
-    If lngLastRow < FIRST_ROW Then
-        MsgBox "Fant ingen Regnr eller VIN fra rad " & FIRST_ROW & " og nedover.", vbInformation, "OFV"
+    If Not IsDate(datFrom) Or Not IsDate(datTo) Then
+        MsgBox "Fyll inn gyldige datoer i cellene for fra-dato og til-dato pa arket '" & INPUT_SHEET & "'.", _
+               vbExclamation, "OFV"
         Exit Sub
     End If
 
-    Dim objFieldMap As Variant
-    objFieldMap = OFV_GetFieldMap()
-    Dim m As Long
+    Dim strDateFromIso As String, strDateToIso As String
+    strDateFromIso = Format$(datFrom, "yyyy-mm-dd")
+    strDateToIso = Format$(datTo, "yyyy-mm-dd")
 
-    ' skriv overskrifter for utdata-kolonnene (rad over forste datarad)
-    If FIRST_ROW > 1 Then
-        For m = LBound(objFieldMap) To UBound(objFieldMap)
-            wsData.Cells(FIRST_ROW - 1, OUTPUT_FIRST_COL + m).Value = objFieldMap(m)(1)
-        Next m
+    ' finn siste datarad pa Input (lengste av Regnr- og VIN-kolonnen)
+    Dim lngLastRowB As Long, lngLastRowC As Long, lngLastRow As Long
+    lngLastRowB = wsInput.Cells(wsInput.Rows.Count, COL_REGNR).End(xlUp).Row
+    lngLastRowC = wsInput.Cells(wsInput.Rows.Count, COL_VIN).End(xlUp).Row
+    lngLastRow = lngLastRowB
+    If lngLastRowC > lngLastRow Then lngLastRow = lngLastRowC
+    If lngLastRow < FIRST_ROW Then
+        MsgBox "Fant ingen Regnr eller VIN fra rad " & FIRST_ROW & " og nedover pa arket '" & INPUT_SHEET & "'.", _
+               vbInformation, "OFV"
+        Exit Sub
     End If
 
     ' bygg liste over unike kjoretoy (Regnr eller VIN, VIN har forrang)
@@ -135,8 +104,8 @@ Public Sub OFV_RefreshInfo()
 
     Dim r As Long, strVin As String, strReg As String, strKey As String
     For r = FIRST_ROW To lngLastRow
-        strVin = Trim$(Replace(CStr(wsData.Cells(r, COL_VIN).Value & vbNullString), " ", vbNullString))
-        strReg = Trim$(Replace(CStr(wsData.Cells(r, COL_REGNR).Value & vbNullString), " ", vbNullString))
+        strVin = Trim$(Replace(CStr(wsInput.Cells(r, COL_VIN).Value & vbNullString), " ", vbNullString))
+        strReg = Trim$(Replace(CStr(wsInput.Cells(r, COL_REGNR).Value & vbNullString), " ", vbNullString))
         strKey = OFV_BuildKey(strVin, strReg)
         If Len(strKey) > 0 Then
             If Not objQueue.Exists(strKey) Then objQueue.Add strKey, strKey
@@ -151,12 +120,27 @@ Public Sub OFV_RefreshInfo()
     Application.Cursor = xlWait
     Application.ScreenUpdating = False
 
-    Dim objResults As Object
-    Set objResults = CreateObject("Scripting.Dictionary")
-    objResults.CompareMode = vbTextCompare
+    Dim objFieldMap As Variant
+    objFieldMap = OFV_GetFieldMap()
+    Dim m As Long
 
-    Dim varKey As Variant, i As Long, t As Long, lngErr As Long
+    ' tom resultatarket (behold ev. tidligere innhold under overskriftene,
+    ' men fjern det siden radantallet varierer fra kjoring til kjoring)
+    Dim lngResultLastRow As Long
+    lngResultLastRow = wsResult.Cells(wsResult.Rows.Count, 1).End(xlUp).Row
+    If lngResultLastRow > 1 Then
+        wsResult.Range(wsResult.Cells(2, 1), wsResult.Cells(lngResultLastRow, UBound(objFieldMap) + 1)).ClearContents
+    End If
+
+    For m = LBound(objFieldMap) To UBound(objFieldMap)
+        wsResult.Cells(1, m + 1).Value = objFieldMap(m)(1)
+    Next m
+    wsResult.Rows(1).Font.Bold = True
+
+    Dim varKey As Variant, i As Long, t As Long, lngErr As Long, lngOutRow As Long, lngTotalRows As Long
     t = objQueue.Count
+    lngOutRow = 2
+
     For Each varKey In objQueue.Keys
         i = i + 1
         Application.StatusBar = "OFV: Henter data (" & i & " av " & t & ") ..."
@@ -166,50 +150,40 @@ Public Sub OFV_RefreshInfo()
         blnIsVin = (strParts(0) = "VIN")
         strIdentifier = strParts(1)
 
-        Dim strStatus As String
-        Dim objFields As Object
-        Set objFields = OFV_QueryVehicle(strApiKey, strIdentifier, blnIsVin, _
-                                          blnPeriodActive, datPeriodFra, datPeriodTil, strStatus)
-        objFields(COL_STATUS) = strStatus
-        If strStatus <> "OK" Then lngErr = lngErr + 1
-        objResults.Add varKey, objFields
+        Dim colRows As Collection
+        Set colRows = OFV_FetchAllTransactionRows(strApiKey, strIdentifier, blnIsVin, strDateFromIso, strDateToIso)
+
+        Dim objRow As Object
+        For Each objRow In colRows
+            If objRow("Status") <> "OK" Then lngErr = lngErr + 1
+            For m = LBound(objFieldMap) To UBound(objFieldMap)
+                Dim strDictKey As String
+                strDictKey = objFieldMap(m)(0)
+                If objRow.Exists(strDictKey) Then
+                    wsResult.Cells(lngOutRow, m + 1).Value = objRow(strDictKey)
+                End If
+            Next m
+            lngOutRow = lngOutRow + 1
+            lngTotalRows = lngTotalRows + 1
+        Next objRow
 
         Sleep OFV_PAUSE_MS
     Next varKey
 
-    ' skriv resultatene tilbake, rad for rad
-    Dim strDictKey As String
-    For r = FIRST_ROW To lngLastRow
-        strVin = Trim$(Replace(CStr(wsData.Cells(r, COL_VIN).Value & vbNullString), " ", vbNullString))
-        strReg = Trim$(Replace(CStr(wsData.Cells(r, COL_REGNR).Value & vbNullString), " ", vbNullString))
-        strKey = OFV_BuildKey(strVin, strReg)
-        If Len(strKey) > 0 Then
-            If objResults.Exists(strKey) Then
-                Dim objF As Object
-                Set objF = objResults(strKey)
-                For m = LBound(objFieldMap) To UBound(objFieldMap)
-                    strDictKey = objFieldMap(m)(0)
-                    If objF.Exists(strDictKey) Then
-                        wsData.Cells(r, OUTPUT_FIRST_COL + m).Value = objF(strDictKey)
-                    End If
-                Next m
+    ' formater dato-kolonnene (3. element i objFieldMap) som ekte datoer
+    If lngOutRow > 2 Then
+        For m = LBound(objFieldMap) To UBound(objFieldMap)
+            If objFieldMap(m)(2) = True Then
+                wsResult.Range(wsResult.Cells(2, m + 1), wsResult.Cells(lngOutRow - 1, m + 1)).NumberFormat = "dd.mm.yyyy"
             End If
-        End If
-    Next r
-
-    ' formater dato-kolonnene (3. element i objFieldMap) som ekte datoer (DD.MM.AAAA)
-    For m = LBound(objFieldMap) To UBound(objFieldMap)
-        If objFieldMap(m)(2) = True Then
-            wsData.Range(wsData.Cells(FIRST_ROW, OUTPUT_FIRST_COL + m), _
-                         wsData.Cells(lngLastRow, OUTPUT_FIRST_COL + m)).NumberFormat = "dd.mm.yyyy"
-        End If
-    Next m
+        Next m
+    End If
 
     Application.StatusBar = False
     Application.Cursor = xlDefault
     Application.ScreenUpdating = True
 
-    MsgBox "OFV: Ferdig. Slo opp " & t & " kjoretoy (" & lngErr & " uten treff/feil).", _
+    MsgBox "OFV: Ferdig. " & lngTotalRows & " rad(er) for " & t & " kjoretoy (" & lngErr & " feil/uten treff).", _
            vbInformation, "OFV"
 End Sub
 
@@ -227,84 +201,142 @@ End Function
 
 
 Private Function OFV_GetFieldMap() As Variant
-    ' {dictionary-nokkel i objFields, kolonneoverskrift i tabellen, er dato}
+    ' {dictionary-nokkel i objRow, kolonneoverskrift i Resultat-arket, er dato}
     OFV_GetFieldMap = Array( _
-        Array(COL_KILDE, COL_KILDE, False), _
-        Array("RegNo", COL_REGNO, False), _
-        Array("ChassisNumber", COL_CHASSIS, False), _
-        Array("MakeName", COL_MAKE, False), _
-        Array("ModelName", COL_MODEL, False), _
-        Array("RegistrationType", COL_REGTYPE, False), _
-        Array("FuelGroup", COL_FUEL, False), _
-        Array("IsLeased", COL_LEASED, False), _
-        Array("IsUsedImported", COL_USEDIMPORT, False), _
-        Array("FirstRegistrationDate", COL_FIRSTREG, True), _
-        Array("LastTransactionDate", COL_LASTTRANS, True), _
-        Array("FromOwnerType", COL_SELGER_TYPE, False), _
-        Array("FromOwnerCompanyName", COL_SELGER_FIRMA, False), _
-        Array("FromOwnerCounty", COL_SELGER_FYLKE, False), _
-        Array("FromOwnerMunicipality", COL_SELGER_KOMMUNE, False), _
-        Array("FromUserCounty", COL_SELGER_BRUKER_FYLKE, False), _
-        Array("ToOwnerType", COL_KJOPER_TYPE, False), _
-        Array("ToOwnerCompanyName", COL_KJOPER_FIRMA, False), _
-        Array("PeriodTransactionDate", COL_PERIODE, True), _
-        Array(COL_STATUS, COL_STATUS, False) _
+        Array("Input", "Input", False), _
+        Array("Kilde", "Kilde", False), _
+        Array("RegNo", "RegNo", False), _
+        Array("ChassisNumber", "Chassisnummer", False), _
+        Array("MakeName", "Merke", False), _
+        Array("ModelName", "Modell", False), _
+        Array("RegistrationType", "RegistreringsType", False), _
+        Array("FuelGroup", "Drivstoffgruppe", False), _
+        Array("IsLeased", "Leaset", False), _
+        Array("IsUsedImported", "Bruktimportert", False), _
+        Array("FirstRegistrationDate", "ForstegangsRegistrering", True), _
+        Array("TransactionNumber", "TransaksjonsNummer", False), _
+        Array("TransactionDate", "Eierskiftedato", True), _
+        Array("FromOwnerType", "SelgerEierType", False), _
+        Array("FromOwnerCompanyName", "SelgerEierFirma", False), _
+        Array("FromOwnerCounty", "SelgerEierFylke", False), _
+        Array("FromOwnerMunicipality", "SelgerEierKommune", False), _
+        Array("FromUserCounty", "SelgerBrukerFylke", False), _
+        Array("ToOwnerType", "KjoperEierType", False), _
+        Array("ToOwnerCompanyName", "KjoperEierFirma", False), _
+        Array("Status", "Status", False) _
     )
 End Function
 
 
 ' =====================================================================
-' Kjoretoyoppslag mot OFV Transactions-API (ett kjoretoy)
+' Henter ALLE transaksjoner for ett kjoretoy innenfor datointervallet
+' (med paginering), og returnerer en Collection av Dictionary-objekter
+' - en per registrering. Ingen treff eller feil gir en enkelt rad med
+' status satt tilsvarende (matcher ofv_transactions_lookup.py).
 ' =====================================================================
-Private Function OFV_QueryVehicle(strApiKey As String, strIdentifier As String, blnIsVin As Boolean, _
-                                   blnPeriodActive As Boolean, datPeriodFra As Variant, datPeriodTil As Variant, _
-                                   ByRef strStatus As String) As Object
-    Dim objFields As Object
-    Set objFields = CreateObject("Scripting.Dictionary")
-    objFields.CompareMode = vbTextCompare
-    objFields(COL_KILDE) = IIf(blnIsVin, "VIN", "Regnr")
-    strStatus = "OK"
-
+Private Function OFV_FetchAllTransactionRows(strApiKey As String, strIdentifier As String, blnIsVin As Boolean, _
+                                              strDateFromIso As String, strDateToIso As String) As Collection
+    Dim colRows As New Collection
     Dim strFilterKey As String
     strFilterKey = IIf(blnIsVin, "chassisNumber", "regNo")
 
-    Dim strBody As String
-    strBody = "{""filters"":{""" & strFilterKey & """:""" & OFV_JsonEscape(strIdentifier) & """}," & _
-              """pagination"":{""first"":1}," & _
-              """sorting"":{""orderBy"":""transactionDate"",""orderDirection"":""DESC""}}"
+    Dim strCursor As String
+    strCursor = vbNullString
 
-    Dim strResponse As String
-    strResponse = OFV_PostWithRetries(strApiKey, strBody, strStatus)
-    If strStatus <> "OK" Then
-        Set OFV_QueryVehicle = objFields
-        Exit Function
+    Do
+        Dim strBody As String
+        strBody = "{""filters"":{""" & strFilterKey & """:""" & OFV_JsonEscape(strIdentifier) & """," & _
+                  """transactionDateFrom"":""" & strDateFromIso & """," & _
+                  """transactionDateTo"":""" & strDateToIso & """}," & _
+                  """pagination"":{""first"":1000"
+        If Len(strCursor) > 0 Then
+            strBody = strBody & ",""cursor"":""" & OFV_JsonEscape(strCursor) & """"
+        End If
+        strBody = strBody & "}," & _
+                  """sorting"":{""orderBy"":""transactionDate"",""orderDirection"":""" & OFV_SORT_DIRECTION & """}}"
+
+        Dim strStatus As String
+        Dim strResponse As String
+        strResponse = OFV_PostWithRetries(strApiKey, strBody, strStatus)
+
+        If strStatus <> "OK" Then
+            colRows.Add OFV_BuildEmptyFields(strIdentifier, blnIsVin, strStatus)
+            Set OFV_FetchAllTransactionRows = colRows
+            Exit Function
+        End If
+
+        Dim strTransactionsArray As String
+        strTransactionsArray = JSON_ExtractObject(strResponse, "transactions")
+
+        Dim colItems As Collection
+        Set colItems = JSON_ArrayAllElements(strTransactionsArray)
+
+        Dim varItem As Variant
+        For Each varItem In colItems
+            colRows.Add OFV_BuildFieldsFromTransaction(strIdentifier, CStr(varItem), blnIsVin)
+        Next varItem
+
+        Dim strPaginationObj As String
+        strPaginationObj = JSON_ExtractObject(strResponse, "pagination")
+
+        Dim varHasNext As Variant, varCursor As Variant
+        varHasNext = JSON_ExtractValue(strPaginationObj, "hasNextPage")
+        varCursor = JSON_ExtractValue(strPaginationObj, "endCursor")
+
+        Dim blnHasNext As Boolean
+        blnHasNext = False
+        If Not IsNull(varHasNext) Then blnHasNext = CBool(varHasNext)
+
+        If blnHasNext And Len(CStr(varCursor & vbNullString)) > 0 Then
+            strCursor = CStr(varCursor)
+            Sleep OFV_PAUSE_MS
+        Else
+            Exit Do
+        End If
+    Loop
+
+    If colRows.Count = 0 Then
+        colRows.Add OFV_BuildEmptyFields(strIdentifier, blnIsVin, "Ingen registreringer i perioden")
     End If
 
-    Dim strTransactionsArray As String, strFirstTransaction As String
-    strTransactionsArray = JSON_ExtractObject(strResponse, "transactions")
-    strFirstTransaction = JSON_ArrayFirstElement(strTransactionsArray)
+    Set OFV_FetchAllTransactionRows = colRows
+End Function
 
-    If Len(strFirstTransaction) = 0 Then
-        strStatus = "Ingen treff"
-        Set OFV_QueryVehicle = objFields
-        Exit Function
-    End If
 
-    objFields("RegNo") = JSON_ExtractValue(strFirstTransaction, "regNo")
-    objFields("ChassisNumber") = JSON_ExtractValue(strFirstTransaction, "chassisNumber")
-    objFields("MakeName") = JSON_ExtractValue(strFirstTransaction, "makeName")
-    objFields("ModelName") = JSON_ExtractValue(strFirstTransaction, "modelName")
-    objFields("RegistrationType") = JSON_ExtractValue(strFirstTransaction, "registrationType")
-    objFields("FuelGroup") = JSON_ExtractValue(strFirstTransaction, "fuelGroup")
-    objFields("IsLeased") = JSON_ExtractValue(strFirstTransaction, "isLeased")
-    objFields("IsUsedImported") = JSON_ExtractValue(strFirstTransaction, "isUsedImported")
-    objFields("FirstRegistrationDate") = OFV_DateFromISO(CStr(JSON_ExtractValue(strFirstTransaction, "firstRegistrationDate") & vbNullString))
-    objFields("LastTransactionDate") = OFV_DateFromISO(CStr(JSON_ExtractValue(strFirstTransaction, "transactionDate") & vbNullString))
+Private Function OFV_BuildEmptyFields(strIdentifier As String, blnIsVin As Boolean, strStatus As String) As Object
+    Dim objFields As Object
+    Set objFields = CreateObject("Scripting.Dictionary")
+    objFields.CompareMode = vbTextCompare
+    objFields("Input") = strIdentifier
+    objFields("Kilde") = IIf(blnIsVin, "VIN", "Regnr")
+    objFields("Status") = strStatus
+    Set OFV_BuildEmptyFields = objFields
+End Function
+
+
+Private Function OFV_BuildFieldsFromTransaction(strIdentifier As String, strTxnJson As String, blnIsVin As Boolean) As Object
+    Dim objFields As Object
+    Set objFields = CreateObject("Scripting.Dictionary")
+    objFields.CompareMode = vbTextCompare
+
+    objFields("Input") = strIdentifier
+    objFields("Kilde") = IIf(blnIsVin, "VIN", "Regnr")
+    objFields("RegNo") = JSON_ExtractValue(strTxnJson, "regNo")
+    objFields("ChassisNumber") = JSON_ExtractValue(strTxnJson, "chassisNumber")
+    objFields("MakeName") = JSON_ExtractValue(strTxnJson, "makeName")
+    objFields("ModelName") = JSON_ExtractValue(strTxnJson, "modelName")
+    objFields("RegistrationType") = JSON_ExtractValue(strTxnJson, "registrationType")
+    objFields("FuelGroup") = JSON_ExtractValue(strTxnJson, "fuelGroup")
+    objFields("IsLeased") = JSON_ExtractValue(strTxnJson, "isLeased")
+    objFields("IsUsedImported") = JSON_ExtractValue(strTxnJson, "isUsedImported")
+    objFields("FirstRegistrationDate") = OFV_DateFromISO(CStr(JSON_ExtractValue(strTxnJson, "firstRegistrationDate") & vbNullString))
+    objFields("TransactionNumber") = JSON_ExtractValue(strTxnJson, "transactionNumber")
+    objFields("TransactionDate") = OFV_DateFromISO(CStr(JSON_ExtractValue(strTxnJson, "transactionDate") & vbNullString))
 
     Dim strFromObj As String, strToObj As String
     Dim strFromOwner As String, strFromUser As String, strToOwner As String, strCompanyObj As String
-    strFromObj = JSON_ExtractObject(strFirstTransaction, "from")
-    strToObj = JSON_ExtractObject(strFirstTransaction, "to")
+    strFromObj = JSON_ExtractObject(strTxnJson, "from")
+    strToObj = JSON_ExtractObject(strTxnJson, "to")
     strFromOwner = JSON_ExtractObject(strFromObj, "owner")
     strFromUser = JSON_ExtractObject(strFromObj, "user")
     strToOwner = JSON_ExtractObject(strToObj, "owner")
@@ -320,34 +352,9 @@ Private Function OFV_QueryVehicle(strApiKey As String, strIdentifier As String, 
     strCompanyObj = JSON_ExtractObject(strToOwner, "companyInfo")
     objFields("ToOwnerCompanyName") = JSON_ExtractValue(strCompanyObj, "name")
 
-    If blnPeriodActive Then
-        Dim strPeriodBody As String
-        strPeriodBody = "{""filters"":{""" & strFilterKey & """:""" & OFV_JsonEscape(strIdentifier) & """," & _
-                        """transactionDateFrom"":""" & Format$(datPeriodFra, "yyyy-mm-dd") & """," & _
-                        """transactionDateTo"":""" & Format$(datPeriodTil, "yyyy-mm-dd") & """}," & _
-                        """pagination"":{""first"":1}," & _
-                        """sorting"":{""orderBy"":""transactionDate"",""orderDirection"":""DESC""}}"
+    objFields("Status") = "OK"
 
-        Dim strPeriodStatus As String
-        strPeriodStatus = "OK"
-        Dim strPeriodResponse As String
-        strPeriodResponse = OFV_PostWithRetries(strApiKey, strPeriodBody, strPeriodStatus)
-
-        If strPeriodStatus = "OK" Then
-            Dim strPeriodArr As String, strPeriodFirst As String
-            strPeriodArr = JSON_ExtractObject(strPeriodResponse, "transactions")
-            strPeriodFirst = JSON_ArrayFirstElement(strPeriodArr)
-            If Len(strPeriodFirst) > 0 Then
-                objFields("PeriodTransactionDate") = OFV_DateFromISO(CStr(JSON_ExtractValue(strPeriodFirst, "transactionDate") & vbNullString))
-            Else
-                objFields("PeriodTransactionDate") = "Ingen eierskifte i perioden"
-            End If
-        Else
-            objFields("PeriodTransactionDate") = "Feil ved periodesok: " & strPeriodStatus
-        End If
-    End If
-
-    Set OFV_QueryVehicle = objFields
+    Set OFV_BuildFieldsFromTransaction = objFields
 End Function
 
 
@@ -425,8 +432,7 @@ End Function
 
 
 ' =====================================================================
-' Generiske JSON-hjelpefunksjoner (haandterer nested objekter/arrays,
-' i motsetning til den enklere strengsokingen i Vegvesenet-makroen -
+' Generiske JSON-hjelpefunksjoner (haandterer nested objekter/arrays -
 ' OFV-svaret har flere nivaer: transactions[].from.owner.companyInfo osv.)
 ' =====================================================================
 Private Function JSON_FindMatchingBrace(strJSON As String, lngOpenPos As Long) As Long
@@ -580,32 +586,57 @@ Private Function JSON_ExtractValue(strJSON As String, strKey As String) As Varia
 End Function
 
 
-Private Function JSON_ArrayFirstElement(strJSONArray As String) As String
-    ' strJSONArray inkl. ytre "[" "]" - returnerer forste element
-    ' (objekt/array som understreng, eller skalarverdi som tekst).
-    If Len(strJSONArray) < 2 Then Exit Function
-    If Left$(strJSONArray, 1) <> "[" Then Exit Function
+Private Function JSON_ArrayAllElements(strJSONArray As String) As Collection
+    ' strJSONArray inkl. ytre "[" "]" - returnerer ALLE elementer i
+    ' arrayet (objekter/arrays som understrenger, eller skalarverdier
+    ' som tekst), i original rekkefolge.
+    Dim colResult As New Collection
+    If Len(strJSONArray) < 2 Then
+        Set JSON_ArrayAllElements = colResult
+        Exit Function
+    End If
+    If Left$(strJSONArray, 1) <> "[" Then
+        Set JSON_ArrayAllElements = colResult
+        Exit Function
+    End If
 
     Dim lngPos As Long
     lngPos = JSON_SkipWhitespace(strJSONArray, 2)
-    If lngPos > Len(strJSONArray) Then Exit Function
-    If Mid$(strJSONArray, lngPos, 1) = "]" Then Exit Function ' tom liste
 
-    Dim strFirstChar As String
-    strFirstChar = Mid$(strJSONArray, lngPos, 1)
-    If strFirstChar = "{" Or strFirstChar = "[" Then
-        Dim lngEnd As Long
-        lngEnd = JSON_FindMatchingBrace(strJSONArray, lngPos)
-        If lngEnd > 0 Then JSON_ArrayFirstElement = Mid$(strJSONArray, lngPos, lngEnd - lngPos + 1)
-    Else
-        Dim i As Long, strResult As String, c As String
-        i = lngPos
-        Do While i <= Len(strJSONArray)
-            c = Mid$(strJSONArray, i, 1)
-            If c = "," Or c = "]" Then Exit Do
-            strResult = strResult & c
-            i = i + 1
-        Loop
-        JSON_ArrayFirstElement = Trim$(strResult)
-    End If
+    Do While lngPos <= Len(strJSONArray)
+        If Mid$(strJSONArray, lngPos, 1) = "]" Then Exit Do
+
+        Dim strFirstChar As String
+        strFirstChar = Mid$(strJSONArray, lngPos, 1)
+        Dim strElement As String, lngEnd As Long
+
+        If strFirstChar = "{" Or strFirstChar = "[" Then
+            lngEnd = JSON_FindMatchingBrace(strJSONArray, lngPos)
+            If lngEnd = 0 Then Exit Do
+            strElement = Mid$(strJSONArray, lngPos, lngEnd - lngPos + 1)
+            lngPos = lngEnd + 1
+        Else
+            Dim i As Long, strResult As String, c As String
+            i = lngPos
+            Do While i <= Len(strJSONArray)
+                c = Mid$(strJSONArray, i, 1)
+                If c = "," Or c = "]" Then Exit Do
+                strResult = strResult & c
+                i = i + 1
+            Loop
+            strElement = Trim$(strResult)
+            lngPos = i
+        End If
+
+        colResult.Add strElement
+
+        lngPos = JSON_SkipWhitespace(strJSONArray, lngPos)
+        If lngPos <= Len(strJSONArray) Then
+            If Mid$(strJSONArray, lngPos, 1) = "," Then
+                lngPos = JSON_SkipWhitespace(strJSONArray, lngPos + 1)
+            End If
+        End If
+    Loop
+
+    Set JSON_ArrayAllElements = colResult
 End Function
