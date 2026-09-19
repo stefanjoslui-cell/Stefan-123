@@ -1,5 +1,5 @@
 """
-OFV Transactions API - oppslag av registreringsdatoer for kjoretoy
+OFV Transactions API - alle registreringer for kjoretoy i et datointervall
 ====================================================================
 
 Hva gjor dette programmet?
@@ -11,18 +11,20 @@ skrive dem rett inn i TEST_IDENTIFIERS nedenfor, for testing.)
 
 For hver bil slar programmet opp mot OFV sitt Transactions-API
 (https://data.ofv.no/api-details#api=transactions-api-v1) og henter
-kjoretoydata, eierskiftedatoer og geografi/eierinfo for selger (from)
-og kjoper (to). Se kolonneoversikt i build_empty_result() nedenfor.
+ALLE registreringer/eierskifter som faller innenfor datointervallet du
+angir i DATE_FROM/DATE_TO nedenfor. Har en bil flere registreringer i
+intervallet, far den en egen rad per registrering i resultatet.
 
 Resultatet skrives til en Excel-fil (.xlsx).
 
 Hvordan bruke det?
 -------------------
 1. Fyll inn API-nokkelen din i feltet API_KEY nedenfor.
-2. Juster INPUT_FILE/TEST_IDENTIFIERS, PERIOD_FROM/PERIOD_TO og
-   OUTPUT_FOLDER/OUTPUT_FILENAME etter behov.
-3. Installer avhengigheter en gang:  pip install -r requirements.txt
-4. Kjor:  python ofv_transactions_lookup.py
+2. Fyll inn DATE_FROM og DATE_TO (format DDMMAAAA, f.eks. 20122026).
+3. Juster INPUT_FILE/TEST_IDENTIFIERS og OUTPUT_FOLDER/OUTPUT_FILENAME
+   etter behov.
+4. Installer avhengigheter en gang:  pip install -r requirements.txt
+5. Kjor:  python ofv_transactions_lookup.py
 """
 
 import os
@@ -63,12 +65,13 @@ OUTPUT_FOLDER = r"C:\Users\cn6971\OneDrive - BDO AS\100. Utvikling\OFV API\Outpu
 OUTPUT_FILENAME = "resultat.xlsx"
 
 # ---------------------------------------------------------------------
-# 4) Periode for "siste eierskifte i gitt periode" (valgfritt)
+# 4) Datointervall (obligatorisk)
+#    Alle registreringer for hver bil som faller innenfor dette
+#    intervallet tas med, en rad per registrering.
 #    Format: DDMMAAAA, f.eks. 20122026 for 20.12.2026.
-#    La begge sta tomme ("") for a IKKE bruke periodefilteret.
 # ---------------------------------------------------------------------
-PERIOD_FROM = ""
-PERIOD_TO = ""
+DATE_FROM = ""
+DATE_TO = ""
 
 # ---------------------------------------------------------------------
 # Teknisk konfigurasjon - trenger normalt ikke endres
@@ -77,13 +80,24 @@ BASE_URL = "https://api.ofv.no/transactions/v1/"
 REQUEST_TIMEOUT = 30
 MAX_RETRIES = 4
 RETRY_BACKOFF_SECONDS = 3
-PAUSE_BETWEEN_VEHICLES = 0.15  # unngar a hamre APIet
+PAUSE_BETWEEN_REQUESTS = 0.15  # unngar a hamre APIet
+SORT_DIRECTION = "ASC"  # ASC = eldste registrering forst, DESC = nyeste forst
 
 CANDIDATE_COLUMN_NAMES = [
     "vin", "vinnr", "vin-nr", "vinnummer",
     "understellsnummer", "understellsnr", "chassisnumber", "chassis",
     "regnr", "reg.nr", "reg nr", "regno", "reg_no",
     "registreringsnummer", "kjennemerke", "regnummer",
+]
+
+# Kolonner i resultatet, i den rekkefolgen de skal vises i Excel.
+ROW_TEMPLATE_KEYS = [
+    "input", "identifiertype", "regNo", "chassisNumber", "makeName", "modelName",
+    "registrationType", "fuelGroup", "isLeased", "isUsedImported",
+    "forstegangsRegistreringsdato", "transactionNumber", "eierskifteDato",
+    "from_owner_type", "from_owner_companyName", "from_owner_countyName",
+    "from_owner_municipalityName", "from_user_countyName",
+    "to_owner_type", "to_owner_companyName", "status",
 ]
 
 
@@ -145,7 +159,7 @@ def write_results_to_excel(results: list, path: str) -> None:
     Excel-skriver konverterer tallaktige tekststrenger til tall og fjerner
     ledende nuller. Dato-celler far et ekte dato-objekt med format
     DD.MM.AAAA, slik at Excel kan sortere/filtrere pa dem som datoer."""
-    columns = list(results[0].keys()) if results else []
+    columns = list(results[0].keys()) if results else ROW_TEMPLATE_KEYS
     workbook = openpyxl.Workbook()
     sheet = workbook.active
     sheet.append(columns)
@@ -199,39 +213,12 @@ def build_identifier_filter(identifier: str) -> dict:
     return {"regNo": identifier}
 
 
-def build_empty_result(identifier: str, id_filter: dict, period_active: bool) -> dict:
-    """Alle kolonner i output, i den rekkefolgen de skal vises i Excel."""
-    result = {
-        # --- identifikasjon ---
-        "input": identifier,
-        "identifiertype": "VIN" if "chassisNumber" in id_filter else "Regnr",
-        "regNo": None,
-        "chassisNumber": None,
-        "makeName": None,
-        "modelName": None,
-        # --- kjoretoyattributter ---
-        "registrationType": None,
-        "fuelGroup": None,
-        "isLeased": None,
-        "isUsedImported": None,
-        # --- datoer (ekte Excel-dato, vises som DD.MM.AAAA) ---
-        "forstegangsRegistreringsdato": None,
-        "sisteEierskifteDato": None,
-        # --- selger (from) ---
-        "from_owner_type": None,
-        "from_owner_companyName": None,
-        "from_owner_countyName": None,
-        "from_owner_municipalityName": None,
-        "from_user_countyName": None,
-        # --- kjoper (to) ---
-        "to_owner_type": None,
-        "to_owner_companyName": None,
-        # --- status ---
-        "status": "OK",
-    }
-    if period_active:
-        result["sisteEierskifteIPeriode"] = None
-    return result
+def empty_row(identifier: str, id_filter: dict, status: str) -> dict:
+    row = dict.fromkeys(ROW_TEMPLATE_KEYS)
+    row["input"] = identifier
+    row["identifiertype"] = "VIN" if "chassisNumber" in id_filter else "Regnr"
+    row["status"] = status
+    return row
 
 
 def party_county(party):
@@ -246,81 +233,84 @@ def company_name(party):
     return ((party or {}).get("companyInfo") or {}).get("name")
 
 
-def lookup_vehicle(
+def build_row_from_transaction(identifier: str, id_filter: dict, transaction: dict) -> dict:
+    from_side = transaction.get("from") or {}
+    to_side = transaction.get("to") or {}
+    from_owner = from_side.get("owner") or {}
+    from_user = from_side.get("user") or {}
+    to_owner = to_side.get("owner") or {}
+
+    row = empty_row(identifier, id_filter, "OK")
+    row["regNo"] = transaction.get("regNo")
+    row["chassisNumber"] = transaction.get("chassisNumber")
+    row["makeName"] = transaction.get("makeName")
+    row["modelName"] = transaction.get("modelName")
+    row["registrationType"] = transaction.get("registrationType")
+    row["fuelGroup"] = transaction.get("fuelGroup")
+    row["isLeased"] = transaction.get("isLeased")
+    row["isUsedImported"] = transaction.get("isUsedImported")
+    row["forstegangsRegistreringsdato"] = parse_api_date(transaction.get("firstRegistrationDate"))
+    row["transactionNumber"] = transaction.get("transactionNumber")
+    row["eierskifteDato"] = parse_api_date(transaction.get("transactionDate"))
+    row["from_owner_type"] = from_owner.get("type")
+    row["from_owner_companyName"] = company_name(from_owner)
+    row["from_owner_countyName"] = party_county(from_owner)
+    row["from_owner_municipalityName"] = party_municipality(from_owner)
+    row["from_user_countyName"] = party_county(from_user)
+    row["to_owner_type"] = to_owner.get("type")
+    row["to_owner_companyName"] = company_name(to_owner)
+    return row
+
+
+def fetch_all_transactions(session: requests.Session, id_filter: dict, date_from_iso: str, date_to_iso: str) -> list:
+    """Henter ALLE transaksjoner for et kjoretoy innenfor datointervallet,
+    med paginering (en bil har normalt fa treff, men vi handterer det uansett)."""
+    transactions = []
+    cursor = None
+    while True:
+        pagination = {"first": 1000}
+        if cursor:
+            pagination["cursor"] = cursor
+
+        payload = {
+            "filters": {
+                **id_filter,
+                "transactionDateFrom": date_from_iso,
+                "transactionDateTo": date_to_iso,
+            },
+            "pagination": pagination,
+            "sorting": {"orderBy": "transactionDate", "orderDirection": SORT_DIRECTION},
+        }
+        data = post_with_retries(session, payload)
+        transactions.extend(data.get("transactions", []))
+
+        page_info = data.get("pagination", {})
+        if page_info.get("hasNextPage") and page_info.get("endCursor"):
+            cursor = page_info["endCursor"]
+            time.sleep(PAUSE_BETWEEN_REQUESTS)
+        else:
+            break
+
+    return transactions
+
+
+def lookup_vehicle_transactions(
     session: requests.Session,
     identifier: str,
-    period_active: bool,
-    period_from_iso: str,
-    period_to_iso: str,
-) -> dict:
+    date_from_iso: str,
+    date_to_iso: str,
+) -> list:
     id_filter = build_identifier_filter(identifier)
-    result = build_empty_result(identifier, id_filter, period_active)
 
     try:
-        overall_payload = {
-            "filters": dict(id_filter),
-            "pagination": {"first": 1},
-            "sorting": {"orderBy": "transactionDate", "orderDirection": "DESC"},
-        }
-        overall_data = post_with_retries(session, overall_payload)
-        transactions = overall_data.get("transactions", [])
-
-        if not transactions:
-            result["status"] = "Ingen treff"
-            return result
-
-        latest = transactions[0]
-        from_side = latest.get("from") or {}
-        to_side = latest.get("to") or {}
-        from_owner = from_side.get("owner") or {}
-        from_user = from_side.get("user") or {}
-        to_owner = to_side.get("owner") or {}
-
-        result["regNo"] = latest.get("regNo")
-        result["chassisNumber"] = latest.get("chassisNumber")
-        result["makeName"] = latest.get("makeName")
-        result["modelName"] = latest.get("modelName")
-
-        result["registrationType"] = latest.get("registrationType")
-        result["fuelGroup"] = latest.get("fuelGroup")
-        result["isLeased"] = latest.get("isLeased")
-        result["isUsedImported"] = latest.get("isUsedImported")
-
-        result["forstegangsRegistreringsdato"] = parse_api_date(latest.get("firstRegistrationDate"))
-        result["sisteEierskifteDato"] = parse_api_date(latest.get("transactionDate"))
-
-        result["from_owner_type"] = from_owner.get("type")
-        result["from_owner_companyName"] = company_name(from_owner)
-        result["from_owner_countyName"] = party_county(from_owner)
-        result["from_owner_municipalityName"] = party_municipality(from_owner)
-        result["from_user_countyName"] = party_county(from_user)
-
-        result["to_owner_type"] = to_owner.get("type")
-        result["to_owner_companyName"] = company_name(to_owner)
-
-        if period_active:
-            period_payload = {
-                "filters": {
-                    **id_filter,
-                    "transactionDateFrom": period_from_iso,
-                    "transactionDateTo": period_to_iso,
-                },
-                "pagination": {"first": 1},
-                "sorting": {"orderBy": "transactionDate", "orderDirection": "DESC"},
-            }
-            period_data = post_with_retries(session, period_payload)
-            period_transactions = period_data.get("transactions", [])
-            if period_transactions:
-                result["sisteEierskifteIPeriode"] = parse_api_date(
-                    period_transactions[0].get("transactionDate")
-                )
-            else:
-                result["sisteEierskifteIPeriode"] = "Ingen eierskifte i perioden"
-
+        transactions = fetch_all_transactions(session, id_filter, date_from_iso, date_to_iso)
     except RuntimeError as exc:
-        result["status"] = f"Feil: {exc}"
+        return [empty_row(identifier, id_filter, f"Feil: {exc}")]
 
-    return result
+    if not transactions:
+        return [empty_row(identifier, id_filter, "Ingen registreringer i perioden")]
+
+    return [build_row_from_transaction(identifier, id_filter, txn) for txn in transactions]
 
 
 def main() -> None:
@@ -328,18 +318,18 @@ def main() -> None:
         print("Du ma fylle inn API_KEY i toppen av scriptet for a kunne kjore det.")
         sys.exit(1)
 
-    period_active = bool(PERIOD_FROM.strip()) and bool(PERIOD_TO.strip())
-    period_from_iso = period_to_iso = None
-    if period_active:
-        try:
-            period_from_iso = ddmmyyyy_to_iso(PERIOD_FROM)
-            period_to_iso = ddmmyyyy_to_iso(PERIOD_TO)
-        except ValueError:
-            print("PERIOD_FROM/PERIOD_TO ma vaere pa formatet DDMMAAAA, f.eks. 20122026.")
-            sys.exit(1)
-        print(f"Periodefilter aktivt: {PERIOD_FROM} - {PERIOD_TO}")
-    else:
-        print("Periodefilter er ikke i bruk (PERIOD_FROM/PERIOD_TO er tomme).")
+    if not DATE_FROM.strip() or not DATE_TO.strip():
+        print("Du ma fylle inn DATE_FROM og DATE_TO (format DDMMAAAA, f.eks. 20122026).")
+        sys.exit(1)
+
+    try:
+        date_from_iso = ddmmyyyy_to_iso(DATE_FROM)
+        date_to_iso = ddmmyyyy_to_iso(DATE_TO)
+    except ValueError:
+        print("DATE_FROM/DATE_TO ma vaere pa formatet DDMMAAAA, f.eks. 20122026.")
+        sys.exit(1)
+
+    print(f"Datointervall: {DATE_FROM} - {DATE_TO}")
 
     if TEST_IDENTIFIERS.strip():
         identifiers = [v.strip() for v in TEST_IDENTIFIERS.split(",") if v.strip()]
@@ -376,16 +366,16 @@ def main() -> None:
     results = []
     for index, identifier in enumerate(identifiers, start=1):
         print(f"[{index}/{len(identifiers)}] Slar opp {identifier} ...")
-        results.append(
-            lookup_vehicle(session, identifier, period_active, period_from_iso, period_to_iso)
-        )
-        time.sleep(PAUSE_BETWEEN_VEHICLES)
+        rows = lookup_vehicle_transactions(session, identifier, date_from_iso, date_to_iso)
+        results.extend(rows)
+        print(f"    -> {len(rows)} rad(er)")
+        time.sleep(PAUSE_BETWEEN_REQUESTS)
 
     os.makedirs(OUTPUT_FOLDER, exist_ok=True)
     output_path = os.path.join(OUTPUT_FOLDER, OUTPUT_FILENAME)
 
     write_results_to_excel(results, output_path)
-    print(f"\nFerdig. Resultatet er lagret i '{output_path}'.")
+    print(f"\nFerdig. {len(results)} rad(er) for {len(identifiers)} kjoretoy lagret i '{output_path}'.")
 
 
 if __name__ == "__main__":
