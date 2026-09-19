@@ -954,7 +954,7 @@ Private Function OFV_FetchAllTransactionRows( _
         If strStatus <> "OK" Then
 
             colRows.Add OFV_BuildEmptyFields( _
-                strApiKey, strIdentifier, blnIsVin, strStatus)
+                strIdentifier, blnIsVin, strStatus)
 
             Set OFV_FetchAllTransactionRows = colRows
             Exit Function
@@ -1022,7 +1022,6 @@ Private Function OFV_FetchAllTransactionRows( _
     If colRows.Count = 0 Then
 
         colRows.Add OFV_BuildEmptyFields( _
-            strApiKey, _
             strIdentifier, _
             blnIsVin, _
             "Ingen registreringer i perioden")
@@ -1035,7 +1034,6 @@ End Function
 
 
 Private Function OFV_BuildEmptyFields( _
-    ByVal strApiKey As String, _
     ByVal strIdentifier As String, _
     ByVal blnIsVin As Boolean, _
     ByVal strStatus As String) As Object
@@ -1056,73 +1054,9 @@ Private Function OFV_BuildEmptyFields( _
         objFields("RegNo") = strIdentifier
     End If
 
-    'Ingen treff i det valgte intervallet betyr ikke at bilen mangler
-    'transaksjonshistorikk - bare at ingen av dem faller i perioden.
-    'Hent forstegangsregistrering (og grunndata) fra siste transaksjon
-    'uansett dato, slik at feltet ikke star tomt nar bilen har hatt
-    'minst ett eierskifte noen gang. Har bilen ALDRI byttet eier,
-    'finnes ingen post a hente fra her heller (se OFV_FillVehicleBaseInfo).
-    If strStatus = "Ingen registreringer i perioden" Then
-        OFV_FillVehicleBaseInfo objFields, strApiKey, strIdentifier, blnIsVin
-    End If
-
     Set OFV_BuildEmptyFields = objFields
 
 End Function
-
-
-Private Sub OFV_FillVehicleBaseInfo( _
-    ByVal objFields As Object, _
-    ByVal strApiKey As String, _
-    ByVal strIdentifier As String, _
-    ByVal blnIsVin As Boolean)
-
-    Dim strFilterKey As String
-    Dim strBody As String
-    Dim strStatus As String
-    Dim strResponse As String
-    Dim strTransactionsArray As String
-    Dim colItems As Collection
-    Dim strTxn As String
-
-    strFilterKey = IIf(blnIsVin, "chassisNumber", "regNo")
-
-    strBody = _
-        "{""filters"":{""" & strFilterKey & """:""" & _
-        OFV_JsonEscape(strIdentifier) & """}," & _
-        """pagination"":{""first"":1}," & _
-        """sorting"":{""orderBy"":""transactionDate""," & _
-        """orderDirection"":""DESC""}}"
-
-    strResponse = OFV_PostWithRetries(strApiKey, strBody, strStatus)
-
-    If strStatus <> "OK" Then Exit Sub
-
-    strTransactionsArray = _
-        JSON_ExtractObject(strResponse, "transactions")
-
-    Set colItems = JSON_ArrayAllElements(strTransactionsArray)
-
-    'Tom liste betyr at bilen aldri har hatt en transaksjon i det
-    'hele tatt - da finnes forstegangsregistreringsdato ikke i
-    'Transactions-API uansett (se Registrations-API for den saken).
-    If colItems.Count = 0 Then Exit Sub
-
-    strTxn = CStr(colItems(1))
-
-    objFields("RegNo") = JSON_ExtractValue(strTxn, "regNo")
-    objFields("ChassisNumber") = _
-        JSON_ExtractValue(strTxn, "chassisNumber")
-    objFields("MakeName") = JSON_ExtractValue(strTxn, "makeName")
-    objFields("ModelName") = JSON_ExtractValue(strTxn, "modelName")
-
-    objFields("FirstRegistrationDate") = _
-        OFV_DateFromISO(OFV_VariantToString( _
-            JSON_ExtractValue(strTxn, "firstRegistrationDate")))
-
-    Sleep OFV_PAUSE_MS
-
-End Sub
 
 
 Private Function OFV_BuildFieldsFromTransaction( _
