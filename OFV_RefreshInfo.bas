@@ -1518,7 +1518,7 @@ Private Sub UpdateControlSheet( _
     ws.Range("E" & HEADER_ROW).value = "Forstegangsregistrert"
     ws.Range("F" & HEADER_ROW).value = "Bokfort dato"
     ws.Range("G" & HEADER_ROW).value = "Transaksjonsdato"
-    ws.Range("H" & HEADER_ROW).value = "Kontrollgrunnlag / type"
+    ws.Range("H" & HEADER_ROW).value = "RegistreringsType"
     ws.Range("I" & HEADER_ROW).value = "Dager avvik"
     ws.Range("J" & HEADER_ROW).value = "Selger"
     ws.Range("K" & HEADER_ROW).value = "Kjoper"
@@ -1550,7 +1550,7 @@ Private Sub UpdateControlSheet( _
         ws.Cells(r, 5).value = row("Forstegangsregistrert")
         ws.Cells(r, 6).value = row("BokfortDato")
         ws.Cells(r, 7).value = row("KontrollTransaksjonDato")
-        ws.Cells(r, 8).value = VariantToString(row("Kontrollgrunnlag"))
+        ws.Cells(r, 8).value = VariantToString(row("RegistreringsType"))
         ws.Cells(r, 9).value = row("DagerAvvik")
         ws.Cells(r, 10).value = VariantToString(row("Selger"))
         ws.Cells(r, 11).value = VariantToString(row("Kjoper"))
@@ -1837,7 +1837,7 @@ Private Function BuildKontrollRow( _
     result("BokfortDato") = bokfortDate
     result("Forstegangsregistrert") = firstRegDate
     result("KontrollTransaksjonDato") = Empty
-    result("Kontrollgrunnlag") = vbNullString
+    result("RegistreringsType") = vbNullString
     result("DagerAvvik") = Empty
     result("Selger") = vbNullString
     result("Kjoper") = vbNullString
@@ -1858,7 +1858,8 @@ Private Function BuildKontrollRow( _
     ElseIf Not sisteTxRow Is Nothing Then
 
         result("KontrollTransaksjonDato") = sisteTxDato
-        result("Kontrollgrunnlag") = "Siste registrerte eierskifte"
+        result("RegistreringsType") = _
+            VariantToString(sisteTxRow("RegistrationType"))
         result("DagerAvvik") = Abs(CLng( _
             CDate(sisteTxDato) - CDate(bokfortDate)))
         result("ApiTreff") = "Treff OFV eierskifte"
