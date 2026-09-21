@@ -378,9 +378,7 @@ Public Sub OFV_RefreshInfo()
             CStr(vehicleData(0)), _
             CStr(vehicleData(1)), _
             vehicleData(2), _
-            vehicleTxRows, _
-            CDate(dateFrom), _
-            CDate(dateTo))
+            vehicleTxRows)
 
         kontrollRows.Add kontrollRow
 
@@ -1388,27 +1386,22 @@ Private Sub UpdateControlSheet( _
 
     ws.Range("A2:M2").Merge
     ws.Range("A2").value = _
-        "Kontrollregel: For hver bil ser vi forst etter det SISTE " & _
-        "eierskiftet OFV har registrert innenfor +/- 1 maned rundt " & _
-        "bokfort dato. Finnes ett eller flere slike, brukes det " & _
-        "nyeste av dem (" & Chr$(171) & "Eierskifte i perioden" & _
-        Chr$(187) & ")."
+        "Kontrollregel: Bokfort dato sjekkes alltid mot bilens SISTE " & _
+        "registrerte eierskifte - den nyeste OFV-transaksjonen for " & _
+        "kjoretoyet, uansett dato. Dager avvik er antall dager mellom " & _
+        "denne datoen og bokfort dato."
 
     ws.Range("A3:M3").Merge
     ws.Range("A3").value = _
-        "Finnes ingen eierskifte i det vinduet, brukes i stedet " & _
-        "bilens SISTE registrerte eierskifte totalt, uansett dato " & _
-        "(" & Chr$(171) & "Siste registrerte eierskifte" & Chr$(187) & _
-        "), og dager avvik regnes fra den datoen i stedet."
+        "Forstegangsregistrering pavirker aldri dette valget - den " & _
+        "vises kun som egen, uavhengig opplysning."
 
     ws.Range("A4:M4").Merge
     ws.Range("A4").value = _
-        "Forstegangsregistrering pavirker aldri dette valget - den " & _
-        "vises kun som egen opplysning. Hver bil har en uthevet " & _
-        "hovedrad med full kontrollinfo (den matchede transaksjonen), " & _
-        "etterfulgt av alle bilens ovrige eierskifter med kun dato " & _
-        "og transaksjonsinfo. Tabellen er sortert med storst dagers " & _
-        "avvik forst."
+        "Hver bil har en uthevet hovedrad med full kontrollinfo (den " & _
+        "matchede - siste - transaksjonen), etterfulgt av alle " & _
+        "bilens ovrige eierskifter med kun dato og transaksjonsinfo. " & _
+        "Tabellen er sortert med storst dagers avvik forst."
 
     ws.Range("A2:A4").Font.Italic = True
     ws.rows("2:4").RowHeight = 15
@@ -1454,8 +1447,8 @@ Private Sub UpdateControlSheet( _
     ws.Range("A6:B6").Merge : ws.Range("A6").value = "Inputbiler"
     ws.Range("G6").value = "Fra dato"
     ws.Range("H6").value = "Til dato"
-    ws.Range("I6:M6").Merge
-    ws.Range("I6").value = "FARGEKODER - DAGER AVVIK"
+    ws.Range("K6:M6").Merge
+    ws.Range("K6").value = "FARGEKODER - DAGER AVVIK"
 
     With ws.Range("A6:M6")
         .Font.Bold = True
@@ -1478,30 +1471,30 @@ Private Sub UpdateControlSheet( _
         .VerticalAlignment = xlCenter
     End With
 
-    ws.Range("I7").value = "0 dager"
-    ws.Range("J7:K7").Merge : ws.Range("J7").value = "1-15 dager"
-    ws.Range("L7:M7").Merge : ws.Range("L7").value = "Over 15 dager"
+    ws.Range("K7").value = "0 dager"
+    ws.Range("L7").value = "1-15 dager"
+    ws.Range("M7").value = "Over 15 dager"
 
-    ws.Range("I8").value = bucket0
-    ws.Range("J8:K8").Merge : ws.Range("J8").value = bucket1til15
-    ws.Range("L8:M8").Merge : ws.Range("L8").value = bucketOver15
+    ws.Range("K8").value = bucket0
+    ws.Range("L8").value = bucket1til15
+    ws.Range("M8").value = bucketOver15
 
-    With ws.Range("I7:I8")
+    With ws.Range("K7:K8")
         .Interior.Color = COLOR_GREEN_FILL
         .Font.Color = COLOR_GREEN_FONT
     End With
 
-    With ws.Range("J7:K8")
+    With ws.Range("L7:L8")
         .Interior.Color = COLOR_YELLOW_FILL
         .Font.Color = COLOR_YELLOW_FONT
     End With
 
-    With ws.Range("L7:M8")
+    With ws.Range("M7:M8")
         .Interior.Color = COLOR_RED_FILL
         .Font.Color = COLOR_RED_FONT
     End With
 
-    With ws.Range("I7:M8")
+    With ws.Range("K7:M8")
         .Font.Bold = True
         .HorizontalAlignment = xlCenter
         .VerticalAlignment = xlCenter
@@ -1517,17 +1510,15 @@ Private Sub UpdateControlSheet( _
     ws.Range("B" & HEADER_ROW).value = "Regnr / input"
     ws.Range("C" & HEADER_ROW).value = "Chassisnummer"
     ws.Range("D" & HEADER_ROW).value = "Modell"
-    ws.Range("E" & HEADER_ROW).value = "Bokfort dato"
-    ws.Range("F" & HEADER_ROW).value = "Forstegangsregistrert"
+    ws.Range("E" & HEADER_ROW).value = "Forstegangsregistrert"
+    ws.Range("F" & HEADER_ROW).value = "Bokfort dato"
     ws.Range("G" & HEADER_ROW).value = "Transaksjonsdato"
     ws.Range("H" & HEADER_ROW).value = "Kontrollgrunnlag / type"
     ws.Range("I" & HEADER_ROW).value = "Dager avvik"
-    ws.Range("J" & HEADER_ROW).value = "Kontrollert"
-    ws.Range("K" & HEADER_ROW).value = "Selger"
-    ws.Range("L" & HEADER_ROW).value = "Kjoper"
-    ws.Range("M" & HEADER_ROW).value = "Status eierskifte"
+    ws.Range("J" & HEADER_ROW).value = "Selger"
+    ws.Range("K" & HEADER_ROW).value = "Kjoper"
 
-    With ws.Range("A" & HEADER_ROW & ":M" & HEADER_ROW)
+    With ws.Range("A" & HEADER_ROW & ":K" & HEADER_ROW)
         .Font.Bold = True
         .Font.Color = RGB(255, 255, 255)
         .Interior.Color = RGB(31, 78, 120)
@@ -1551,17 +1542,15 @@ Private Sub UpdateControlSheet( _
         ws.Cells(r, 2).value = VariantToString(row("RegnrInput"))
         ws.Cells(r, 3).value = VariantToString(row("Chassisnummer"))
         ws.Cells(r, 4).value = VariantToString(row("Modell"))
-        ws.Cells(r, 5).value = row("BokfortDato")
-        ws.Cells(r, 6).value = row("Forstegangsregistrert")
+        ws.Cells(r, 5).value = row("Forstegangsregistrert")
+        ws.Cells(r, 6).value = row("BokfortDato")
         ws.Cells(r, 7).value = row("KontrollTransaksjonDato")
         ws.Cells(r, 8).value = VariantToString(row("Kontrollgrunnlag"))
         ws.Cells(r, 9).value = row("DagerAvvik")
-        ws.Cells(r, 10).value = VariantToString(row("Kontrollert"))
-        ws.Cells(r, 11).value = VariantToString(row("Selger"))
-        ws.Cells(r, 12).value = VariantToString(row("Kjoper"))
-        ws.Cells(r, 13).value = VariantToString(row("StatusEierskifte"))
+        ws.Cells(r, 10).value = VariantToString(row("Selger"))
+        ws.Cells(r, 11).value = VariantToString(row("Kjoper"))
 
-        With ws.Range(ws.Cells(r, 1), ws.Cells(r, 13))
+        With ws.Range(ws.Cells(r, 1), ws.Cells(r, 11))
             .Font.Bold = True
             .Interior.Color = RGB(238, 244, 251)
         End With
@@ -1613,16 +1602,14 @@ Private Sub UpdateControlSheet( _
                     ws.Cells(r, 7).value = txRow("TransactionDate")
                     ws.Cells(r, 8).value = _
                         VariantToString(txRow("RegistrationType"))
-                    ws.Cells(r, 11).value = ComputeOwnerLabel( _
+                    ws.Cells(r, 10).value = ComputeOwnerLabel( _
                         VariantToString(txRow("FromOwnerType")), _
                         VariantToString(txRow("FromOwnerCompanyName")))
-                    ws.Cells(r, 12).value = ComputeOwnerLabel( _
+                    ws.Cells(r, 11).value = ComputeOwnerLabel( _
                         VariantToString(txRow("ToOwnerType")), _
                         VariantToString(txRow("ToOwnerCompanyName")))
-                    ws.Cells(r, 13).value = _
-                        VariantToString(txRow("Status"))
 
-                    With ws.Range(ws.Cells(r, 1), ws.Cells(r, 13))
+                    With ws.Range(ws.Cells(r, 1), ws.Cells(r, 11))
                         .Font.Italic = True
                         .Font.Color = RGB(90, 90, 90)
                     End With
@@ -1637,7 +1624,7 @@ Private Sub UpdateControlSheet( _
 
         ' Tykk topplinje over hver ny bil, sa gruppene er lette a se.
         With ws.Range( _
-            ws.Cells(groupStartRow, 1), ws.Cells(groupStartRow, 13)).Borders(xlEdgeTop)
+            ws.Cells(groupStartRow, 1), ws.Cells(groupStartRow, 11)).Borders(xlEdgeTop)
 
             .LineStyle = xlContinuous
             .Color = RGB(31, 78, 120)
@@ -1650,7 +1637,7 @@ Private Sub UpdateControlSheet( _
     lastRow = r - 1
     If lastRow < FIRST_DATA_ROW Then lastRow = FIRST_DATA_ROW
 
-    With ws.Range("A" & FIRST_DATA_ROW & ":M" & lastRow)
+    With ws.Range("A" & FIRST_DATA_ROW & ":K" & lastRow)
         .Font.Size = 10
         .VerticalAlignment = xlCenter
         .rows.RowHeight = 18
@@ -1661,7 +1648,7 @@ Private Sub UpdateControlSheet( _
 
     ws.Range("I" & FIRST_DATA_ROW & ":I" & lastRow).NumberFormat = "0"
 
-    With ws.Range("A" & HEADER_ROW & ":M" & lastRow).Borders
+    With ws.Range("A" & HEADER_ROW & ":K" & lastRow).Borders
         .LineStyle = xlContinuous
         .Color = RGB(217, 226, 243)
         .Weight = xlThin
@@ -1673,9 +1660,9 @@ Private Sub UpdateControlSheet( _
     ws.Columns("D").ColumnWidth = 18
     ws.Columns("E:G").ColumnWidth = 16
     ws.Columns("H").ColumnWidth = 24
-    ws.Columns("I:J").ColumnWidth = 12
-    ws.Columns("K:L").ColumnWidth = 25
-    ws.Columns("M").ColumnWidth = 28
+    ws.Columns("I").ColumnWidth = 12
+    ws.Columns("J:K").ColumnWidth = 25
+    ws.Columns("L:M").ColumnWidth = 14
 
 End Sub
 
@@ -1732,31 +1719,21 @@ End Function
 
 ' Bygger kontroll-raden for ett kjoretoy.
 '
-' Kontrollregel (i denne rekkefolgen):
-'   1. Se etter det SISTE eierskiftet innenfor +/- 1 maned rundt
-'      bokfort dato. Finnes ett eller flere, brukes det nyeste av dem.
-'   2. Finnes ingen eierskifte i det vinduet, brukes i stedet bilens
-'      SISTE registrerte eierskifte totalt (uansett dato), og avviket
-'      regnes fra den datoen - markert tydelig som "utenfor perioden"
-'      i ApiTreff/Kontrollgrunnlag, slik at det ikke forveksles med et
-'      treff innenfor vinduet.
-'   3. Forstegangsregistrering pavirker ALDRI dette valget - den vises
-'      kun som egen, uavhengig kolonne (forste gang bilen ble
-'      registrert, hentet fra hvilken som helst av bilens
-'      transaksjoner).
+' Kontrollregel: bokfort dato sjekkes ALLTID mot bilens SISTE
+' registrerte eierskifte (den nyeste OFV-transaksjonen for kjoretoyet,
+' uansett dato). Forstegangsregistrering pavirker aldri dette valget -
+' den vises kun som egen, uavhengig kolonne.
 '
 ' Alle bilens eierskifter samles ogsa i "AlleTransaksjoner" (sortert
 ' pa dato), slik at UpdateControlSheet kan vise dem som egne rader
-' under kjoretoyets hovedrad. Den valgte transaksjonen merkes med
-' ErKontrollMatch=True direkte pa det delte JSON-objektet, slik at
+' under kjoretoyets hovedrad. Den valgte (siste) transaksjonen merkes
+' med ErKontrollMatch=True direkte pa det delte JSON-objektet, slik at
 ' Resultat-arket kan kjenne igjen og utheve akkurat den samme raden.
 Private Function BuildKontrollRow( _
     ByVal regNo As String, _
     ByVal vin As String, _
     ByVal bokfortRaw As Variant, _
-    ByVal vehicleTxRows As Collection, _
-    ByVal periodeFra As Date, _
-    ByVal periodeTil As Date) As Object
+    ByVal vehicleTxRows As Collection) As Object
 
     Dim result As Object
     Dim txRow As Variant
@@ -1768,11 +1745,6 @@ Private Function BuildKontrollRow( _
     Dim errorStatus As String
     Dim hasAnyOkRow As Boolean
 
-    Dim vinduFra As Date
-    Dim vinduTil As Date
-
-    Dim matchITxDato As Variant
-    Dim matchITxRow As Object
     Dim sisteTxDato As Variant
     Dim sisteTxRow As Object
 
@@ -1785,19 +1757,12 @@ Private Function BuildKontrollRow( _
     bokfortDate = Empty
     If IsDate(bokfortRaw) Then bokfortDate = CDate(bokfortRaw)
 
-    If Not IsEmpty(bokfortDate) Then
-        vinduFra = DateAdd("m", -1, CDate(bokfortDate))
-        vinduTil = DateAdd("m", 1, CDate(bokfortDate))
-    End If
-
     firstRegDate = Empty
     modelName = vbNullString
     chassisNo = vin
     errorStatus = vbNullString
     hasAnyOkRow = False
 
-    matchITxDato = Empty
-    Set matchITxRow = Nothing
     sisteTxDato = Empty
     Set sisteTxRow = Nothing
 
@@ -1832,7 +1797,7 @@ Private Function BuildKontrollRow( _
 
                 If IsDate(txRow("TransactionDate")) Then
 
-                    ' Siste registrerte eierskifte totalt (reserve).
+                    ' Siste registrerte eierskifte totalt.
                     If IsEmpty(sisteTxDato) Then
 
                         sisteTxDato = txRow("TransactionDate")
@@ -1843,26 +1808,6 @@ Private Function BuildKontrollRow( _
 
                         sisteTxDato = txRow("TransactionDate")
                         Set sisteTxRow = txRow
-
-                    End If
-
-                    ' Siste eierskifte innenfor +/- 1 maned-vinduet.
-                    If Not IsEmpty(bokfortDate) And _
-                       CDate(txRow("TransactionDate")) >= vinduFra And _
-                       CDate(txRow("TransactionDate")) <= vinduTil Then
-
-                        If IsEmpty(matchITxDato) Then
-
-                            matchITxDato = txRow("TransactionDate")
-                            Set matchITxRow = txRow
-
-                        ElseIf CDate(txRow("TransactionDate")) > _
-                            CDate(matchITxDato) Then
-
-                            matchITxDato = txRow("TransactionDate")
-                            Set matchITxRow = txRow
-
-                        End If
 
                     End If
 
@@ -1891,7 +1836,6 @@ Private Function BuildKontrollRow( _
     result("DagerAvvik") = Empty
     result("Selger") = vbNullString
     result("Kjoper") = vbNullString
-    result("StatusEierskifte") = vbNullString
     Set result("MatchetTransaksjon") = Nothing
 
     If IsEmpty(bokfortDate) Then
@@ -1906,36 +1850,13 @@ Private Function BuildKontrollRow( _
 
         result("Kontrollert") = "Nei"
 
-    ElseIf Not matchITxRow Is Nothing Then
-
-        result("KontrollTransaksjonDato") = matchITxDato
-        result("Kontrollgrunnlag") = "Eierskifte i perioden"
-        result("DagerAvvik") = Abs(CLng( _
-            CDate(matchITxDato) - CDate(bokfortDate)))
-        result("ApiTreff") = "Treff OFV eierskifte i perioden"
-        result("Kontrollert") = "Ja"
-        Set result("MatchetTransaksjon") = matchITxRow
-
-        result("Selger") = ComputeOwnerLabel( _
-            VariantToString(matchITxRow("FromOwnerType")), _
-            VariantToString(matchITxRow("FromOwnerCompanyName")))
-
-        result("Kjoper") = ComputeOwnerLabel( _
-            VariantToString(matchITxRow("ToOwnerType")), _
-            VariantToString(matchITxRow("ToOwnerCompanyName")))
-
-        result("StatusEierskifte") = _
-            VariantToString(matchITxRow("Status"))
-
-        matchITxRow("ErKontrollMatch") = True
-
     ElseIf Not sisteTxRow Is Nothing Then
 
         result("KontrollTransaksjonDato") = sisteTxDato
         result("Kontrollgrunnlag") = "Siste registrerte eierskifte"
         result("DagerAvvik") = Abs(CLng( _
             CDate(sisteTxDato) - CDate(bokfortDate)))
-        result("ApiTreff") = "Siste eierskifte (utenfor perioden)"
+        result("ApiTreff") = "Treff OFV eierskifte"
         result("Kontrollert") = "Ja"
         Set result("MatchetTransaksjon") = sisteTxRow
 
@@ -1946,9 +1867,6 @@ Private Function BuildKontrollRow( _
         result("Kjoper") = ComputeOwnerLabel( _
             VariantToString(sisteTxRow("ToOwnerType")), _
             VariantToString(sisteTxRow("ToOwnerCompanyName")))
-
-        result("StatusEierskifte") = _
-            VariantToString(sisteTxRow("Status"))
 
         sisteTxRow("ErKontrollMatch") = True
 
