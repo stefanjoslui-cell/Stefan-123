@@ -44,15 +44,13 @@ Private Const COL_REGNR As Long = 2
 Private Const COL_VIN As Long = 3
 Private Const COL_BOKFORT As Long = 4
 
-' UBEKREFTET: swagger sier basePath "/transactions/v1" og
-' query-transactions ligger pa sti "/", og portalens domene er
-' data.ofv.no - men dette er fortsatt en beste gjetning, ikke
-' bekreftet mot et faktisk 200-svar. Sjekk "Try it"-konsollen i
-' https://data.ofv.no/api-details#api=transactions-api-v1&operation=query-transactions
-' og bytt til den eksakte Request URL-en den viser hvis denne
-' fortsatt gir 404.
+' Bekreftet via "Try it"-konsollen i Azure APIM-portalen
+' (https://data.ofv.no/api-details#api=transactions-api-v1&operation=query-transactions):
+' POST https://api.ofv.no/transactions/v1/ - dette er den faktiske
+' verten APIet ruter pa, uavhengig av at portalens eget domene er
+' data.ofv.no.
 Private Const OFV_URL As String = _
-    "https://data.ofv.no/transactions/v1/"
+    "https://api.ofv.no/transactions/v1/"
 
 Private Const MAX_RETRIES As Long = 4
 Private Const RETRY_WAIT_MS As Long = 3000
@@ -942,7 +940,7 @@ Private Function PostOFVWithRetries( _
             "Content-Type", "application/json"
 
         http.SetRequestHeader _
-            "Accept", "application/json"
+            "Cache-Control", "no-cache"
 
         http.SetRequestHeader _
             "Ocp-Apim-Subscription-Key", apiKey
