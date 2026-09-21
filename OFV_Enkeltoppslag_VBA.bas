@@ -1051,8 +1051,6 @@ Private Sub WriteReportSheet( _
     ws.Columns("I").ColumnWidth = 20
     ws.Columns("J").ColumnWidth = 30
 
-    ws.Range("A1").Select
-
 End Sub
 
 
