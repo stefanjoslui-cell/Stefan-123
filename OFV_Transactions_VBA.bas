@@ -1,13 +1,5 @@
 Option Explicit
 
-#If VBA7 Then
-    Private Declare PtrSafe Sub Sleep Lib "kernel32" _
-        (ByVal dwMilliseconds As LongPtr)
-#Else
-    Private Declare Sub Sleep Lib "kernel32" _
-        (ByVal dwMilliseconds As Long)
-#End If
-
 '==============================================================
 ' KONFIGURASJON
 '==============================================================
@@ -25,32 +17,53 @@ Private Const FIRST_ROW As Long = 5
 Private Const COL_REGNR As Long = 2
 Private Const COL_VIN As Long = 3
 
-Private Const OFV_BASE_URL As String = _
+Private Const OFV_URL As String = _
     "https://api.ofv.no/transactions/v1/"
 
-Private Const OFV_MAX_RETRIES As Long = 4
-Private Const OFV_RETRY_WAIT_MS As Long = 3000
-Private Const OFV_PAUSE_MS As Long = 150
-Private Const OFV_SORT_DIRECTION As String = "ASC"
+Private Const SVV_URL As String = _
+    "https://akfell-datautlevering.atlas.vegvesen.no/" & _
+    "enkeltoppslag/kjoretoydata?"
+
+Private Const MAX_RETRIES As Long = 4
+Private Const RETRY_WAIT_MS As Long = 3000
+Private Const API_PAUSE_MS As Long = 150
 
 
 '==============================================================
-' NORSKE TEKSTER - BYGGES MED CHRW FOR A UNNGA o/ae
+' VENTEFUNKSJON UTEN WIN32-KALL
+'
+' Windows Defender sin ASR-regel "Blokker Win32 API-kall fra
+' Office-makro" blokkerer enhver Declare ... Lib "kernel32", ogsa
+' en uskyldig Sleep. SafePause gir samme oppforsel (en ikke-
+' blokkerende pause i millisekunder) med rent VBA - Timer og
+' DoEvents - uten noen ekstern bibliotekdeklarasjon.
 '==============================================================
 
-Private Function OFV_BuyerTypeHeader() As String
-    OFV_BuyerTypeHeader = "Kj" & ChrW(248) & "perType"
-End Function
+Private Sub SafePause(ByVal milliseconds As Long)
 
-Private Function OFV_BuyerCountyHeader() As String
-    OFV_BuyerCountyHeader = _
-        "Kj" & ChrW(248) & "perEierFylke"
-End Function
+    Dim startTime As Double
+    Dim currentTime As Double
+    Dim elapsedMilliseconds As Double
 
-Private Function OFV_VehicleWord() As String
-    OFV_VehicleWord = _
-        "kj" & ChrW(248) & "ret" & ChrW(248) & "y"
-End Function
+    If milliseconds <= 0 Then Exit Sub
+
+    startTime = Timer
+
+    Do
+        DoEvents
+        currentTime = Timer
+
+        If currentTime >= startTime Then
+            elapsedMilliseconds = _
+                (currentTime - startTime) * 1000#
+        Else
+            elapsedMilliseconds = _
+                ((86400# - startTime) + currentTime) * 1000#
+        End If
+
+    Loop While elapsedMilliseconds < milliseconds
+
+End Sub
 
 
 '==============================================================
@@ -65,246 +78,370 @@ Public Sub OFV_RefreshInfo()
     Dim wsControl As Worksheet
     Dim loResult As ListObject
 
-    Dim objQueue As Object
-    Dim objHitVehicles As Object
-    Dim objFieldMap As Variant
+    Dim queue As Object
+    Dim hitVehicles As Object
+    Dim vehicleInfo As Object
+    Dim resultRow As Object
 
-    Dim colAllRows As Collection
-    Dim colVehicleRows As Collection
-    Dim objRow As Object
+    Dim allRows As Collection
+    Dim vehicleRows As Collection
 
-    Dim strApiKey As String
-    Dim datFrom As Variant
-    Dim datTo As Variant
-    Dim strDateFromIso As String
-    Dim strDateToIso As String
-    Dim strStage As String
+    Dim fieldMap As Variant
+    Dim vehicleData As Variant
+    Dim output() As Variant
 
-    Dim lngLastRowB As Long
-    Dim lngLastRowC As Long
-    Dim lngLastRow As Long
-    Dim lngOldLastRow As Long
-    Dim lngNewLastRow As Long
-    Dim lngFieldCount As Long
-    Dim lngOutputRows As Long
-    Dim lngTransactionRows As Long
-    Dim lngNoHit As Long
-    Dim lngApiErrors As Long
+    Dim ofvKey As String
+    Dim svvKey As String
+    Dim dateFrom As Variant
+    Dim dateTo As Variant
+    Dim DateFromISO As String
+    Dim dateToISO As String
+    Dim stage As String
+
+    Dim lastRegRow As Long
+    Dim lastVinRow As Long
+    Dim lastInputRow As Long
+    Dim oldLastRow As Long
+    Dim newLastRow As Long
+    Dim fieldCount As Long
+    Dim outputRows As Long
+
+    Dim transactionCount As Long
+    Dim noTransactionCount As Long
+    Dim ofvErrorCount As Long
+    Dim svvDateCount As Long
+    Dim svvErrorCount As Long
 
     Dim r As Long
-    Dim m As Long
-    Dim i As Long
-    Dim t As Long
+    Dim c As Long
+    Dim currentVehicle As Long
+    Dim totalVehicles As Long
 
-    Dim strVin As String
-    Dim strReg As String
-    Dim strKey As String
-    Dim strIdentifier As String
-    Dim strDictKey As String
-    Dim strStatus As String
-    Dim strParts() As String
+    Dim regNo As String
+    Dim vin As String
+    Dim queueKey As String
+    Dim identifier As String
+    Dim dictionaryKey As String
+    Dim statusText As String
 
-    Dim blnIsVin As Boolean
-    Dim varKey As Variant
-    Dim varValue As Variant
-    Dim arrOutput() As Variant
+    Dim useVin As Boolean
+    Dim key As Variant
+    Dim value As Variant
 
     Dim oldScreenUpdating As Boolean
     Dim oldEnableEvents As Boolean
     Dim oldCalculation As XlCalculation
     Dim oldCursor As Variant
-    Dim blnApplicationChanged As Boolean
+    Dim applicationChanged As Boolean
 
     On Error GoTo FatalError
 
-    strStage = "finner arkene"
+    stage = "finner arkene"
+    API_ShowStatus "Forbereder", stage
 
     Set wsInput = ThisWorkbook.Worksheets(INPUT_SHEET)
     Set wsResult = ThisWorkbook.Worksheets(RESULT_SHEET)
     Set wsOverview = ThisWorkbook.Worksheets(OVERVIEW_SHEET)
-
-    On Error Resume Next
     Set wsControl = ThisWorkbook.Worksheets(CONTROL_SHEET)
-    On Error GoTo FatalError
 
-    strStage = "leser API-nokkel og datoer"
-
-    strApiKey = Trim$(CStr( _
-        ThisWorkbook.Names("OFV_API").RefersToRange.Value))
-
-    datFrom = ThisWorkbook.Names( _
-        "OFV_DateFrom").RefersToRange.Value
-
-    datTo = ThisWorkbook.Names( _
-        "OFV_DateTo").RefersToRange.Value
-
-    If Len(strApiKey) = 0 Then
-        MsgBox "Fant ingen API-nokkel i OFV_API.", _
-               vbExclamation, "OFV"
-        Exit Sub
+    If wsResult.ProtectContents Then
+        Err.Raise vbObjectError + 1000, , _
+            "Resultat-arket er beskyttet."
     End If
 
-    If Not IsDate(datFrom) Or Not IsDate(datTo) Then
+    If wsControl.ProtectContents Then
+        Err.Raise vbObjectError + 1001, , _
+            "Kontroll solgte biler er beskyttet."
+    End If
+
+    stage = "leser API-nokler"
+    API_ShowStatus "Forbereder", stage
+
+    ofvKey = Trim$(CStr( _
+        ThisWorkbook.Names("OFV_API").RefersToRange.value))
+
+    svvKey = Trim$(CStr( _
+        ThisWorkbook.Names( _
+        "API_Key_Vegvesenet").RefersToRange.value))
+
+    If Len(ofvKey) = 0 Then
+        MsgBox "Fant ingen OFV-nokkel i OFV_API.", _
+            vbExclamation, "API-oppdatering"
+        GoTo SafeExit
+    End If
+
+    If Len(svvKey) = 0 Then
+        MsgBox "Fant ingen Vegvesen-nokkel.", _
+            vbExclamation, "API-oppdatering"
+        GoTo SafeExit
+    End If
+
+    stage = "leser datoperioden"
+    API_ShowStatus "Forbereder", stage
+
+    dateFrom = ThisWorkbook.Names( _
+        "OFV_DateFrom").RefersToRange.value
+
+    dateTo = ThisWorkbook.Names( _
+        "OFV_DateTo").RefersToRange.value
+
+    If Not IsDate(dateFrom) Or Not IsDate(dateTo) Then
         MsgBox "Fyll inn gyldige datoer i Input!B2:B3.", _
-               vbExclamation, "OFV"
-        Exit Sub
+            vbExclamation, "API-oppdatering"
+        GoTo SafeExit
     End If
 
-    If CDate(datFrom) > CDate(datTo) Then
+    If CDate(dateFrom) > CDate(dateTo) Then
         MsgBox "Fra-dato kan ikke vaere senere enn til-dato.", _
-               vbExclamation, "OFV"
-        Exit Sub
+            vbExclamation, "API-oppdatering"
+        GoTo SafeExit
     End If
 
-    strDateFromIso = Format$(CDate(datFrom), "yyyy-mm-dd")
-    strDateToIso = Format$(CDate(datTo), "yyyy-mm-dd")
+    DateFromISO = Format$(CDate(dateFrom), "yyyy-mm-dd")
+    dateToISO = Format$(CDate(dateTo), "yyyy-mm-dd")
 
-    strStage = "leser kjoretoylisten"
+    stage = "leser kjoretoylisten"
+    API_ShowStatus "Forbereder", stage
 
-    lngLastRowB = wsInput.Cells( _
-        wsInput.Rows.Count, COL_REGNR).End(xlUp).Row
+    lastRegRow = wsInput.Cells( _
+        wsInput.rows.Count, COL_REGNR).End(xlUp).Row
 
-    lngLastRowC = wsInput.Cells( _
-        wsInput.Rows.Count, COL_VIN).End(xlUp).Row
+    lastVinRow = wsInput.Cells( _
+        wsInput.rows.Count, COL_VIN).End(xlUp).Row
 
-    lngLastRow = Application.Max(lngLastRowB, lngLastRowC)
+    lastInputRow = Application.Max(lastRegRow, lastVinRow)
 
-    If lngLastRow < FIRST_ROW Then
-        MsgBox "Fant ingen registreringsnummer eller VIN.", _
-               vbInformation, "OFV"
-        Exit Sub
-    End If
+    Set queue = CreateObject("Scripting.Dictionary")
+    queue.CompareMode = vbTextCompare
 
-    Set objQueue = CreateObject("Scripting.Dictionary")
-    objQueue.CompareMode = vbTextCompare
+    For r = FIRST_ROW To lastInputRow
 
-    For r = FIRST_ROW To lngLastRow
+        regNo = NormalizeIdentifier( _
+            wsInput.Cells(r, COL_REGNR).value)
 
-        strVin = UCase$(Trim$(Replace( _
-            CStr(wsInput.Cells(r, COL_VIN).Value & vbNullString), _
-            " ", vbNullString)))
+        vin = NormalizeIdentifier( _
+            wsInput.Cells(r, COL_VIN).value)
 
-        strReg = UCase$(Trim$(Replace( _
-            CStr(wsInput.Cells(r, COL_REGNR).Value & vbNullString), _
-            " ", vbNullString)))
+        queueKey = BuildVehicleKey(vin, regNo)
 
-        strKey = OFV_BuildKey(strVin, strReg)
-
-        If Len(strKey) > 0 Then
-            If Not objQueue.Exists(strKey) Then
-                objQueue.Add strKey, strKey
+        If Len(queueKey) > 0 Then
+            If Not queue.Exists(queueKey) Then
+                queue.Add queueKey, Array(regNo, vin)
             End If
         End If
 
     Next r
 
-    If objQueue.Count = 0 Then
-        MsgBox "Fant ingen gyldige registreringsnummer eller VIN.", _
-               vbInformation, "OFV"
-        Exit Sub
+    If queue.Count = 0 Then
+        MsgBox "Fant ingen registreringsnummer eller VIN.", _
+            vbInformation, "API-oppdatering"
+        GoTo SafeExit
     End If
 
     oldScreenUpdating = Application.ScreenUpdating
     oldEnableEvents = Application.EnableEvents
     oldCalculation = Application.Calculation
-    oldCursor = Application.Cursor
+    oldCursor = Application.cursor
 
     Application.ScreenUpdating = False
     Application.EnableEvents = False
     Application.Calculation = xlCalculationManual
-    Application.Cursor = xlWait
+    Application.cursor = xlWait
+    applicationChanged = True
 
-    blnApplicationChanged = True
+    Set allRows = New Collection
 
-    objFieldMap = OFV_GetFieldMap()
-    lngFieldCount = UBound(objFieldMap) + 1
+    Set hitVehicles = _
+        CreateObject("Scripting.Dictionary")
 
-    Set colAllRows = New Collection
-    Set objHitVehicles = CreateObject("Scripting.Dictionary")
-    objHitVehicles.CompareMode = vbTextCompare
+    hitVehicles.CompareMode = vbTextCompare
 
-    t = objQueue.Count
-    strStage = "henter data fra OFV"
+    fieldMap = GetFieldMap()
+    fieldCount = UBound(fieldMap) + 1
+    totalVehicles = queue.Count
 
-    For Each varKey In objQueue.Keys
+    '==========================================================
+    ' HENT DATA
+    '==========================================================
 
-        i = i + 1
+    For Each key In queue.Keys
 
-        Application.StatusBar = _
-            "OFV: Henter data (" & i & " av " & t & ") ..."
+        currentVehicle = currentVehicle + 1
+        vehicleData = queue(key)
 
-        strParts = Split(CStr(varKey), "|")
-        blnIsVin = (strParts(0) = "VIN")
-        strIdentifier = strParts(1)
+        regNo = CStr(vehicleData(0))
+        vin = CStr(vehicleData(1))
 
-        Set colVehicleRows = OFV_FetchAllTransactionRows( _
-            strApiKey, _
-            strIdentifier, _
-            blnIsVin, _
-            strDateFromIso, _
-            strDateToIso)
+        useVin = (Len(vin) > 0)
 
-        For Each objRow In colVehicleRows
+        If useVin Then
+            identifier = vin
+        Else
+            identifier = regNo
+        End If
 
-            colAllRows.Add objRow
-            strStatus = OFV_VariantToString(objRow("Status"))
+        '------------------------------------------------------
+        ' STATENS VEGVESEN
+        '------------------------------------------------------
 
-            If strStatus = "OK" Then
+        stage = _
+            "henter forstegangsregistrering fra Statens vegvesen"
 
-                lngTransactionRows = lngTransactionRows + 1
+        API_ShowStatus _
+            "Statens vegvesen", _
+            "Forstegangsregistrering", _
+            identifier, _
+            currentVehicle, _
+            totalVehicles
 
-                If Not objHitVehicles.Exists(strIdentifier) Then
-                    objHitVehicles.Add strIdentifier, True
-                End If
+        Set vehicleInfo = FetchVehicleInfoFromSVV( _
+            svvKey, regNo, vin)
 
-            ElseIf Left$(strStatus, 5) = "Feil:" Then
+        If vehicleInfo.Exists( _
+            "FirstRegistrationDate") Then
 
-                lngApiErrors = lngApiErrors + 1
+            If IsDate(vehicleInfo( _
+                "FirstRegistrationDate")) Then
 
-            Else
-
-                lngNoHit = lngNoHit + 1
+                svvDateCount = svvDateCount + 1
 
             End If
 
-        Next objRow
+        End If
 
-        Sleep OFV_PAUSE_MS
+        statusText = VariantToString( _
+            vehicleInfo("Status"))
 
-    Next varKey
+        If Left$(statusText, 5) = "Feil:" Then
+            svvErrorCount = svvErrorCount + 1
+        End If
 
-    lngOutputRows = colAllRows.Count
+        '------------------------------------------------------
+        ' OFV
+        '------------------------------------------------------
 
-    strStage = "finner resultat-tabellen"
+        stage = "henter eierskifter fra OFV"
 
-    Set loResult = OFV_GetOrCreateResultTable( _
-        wsResult, objFieldMap)
+        API_ShowStatus _
+            "OFV", _
+            "Eierskifter", _
+            identifier, _
+            currentVehicle, _
+            totalVehicles
 
-    lngOldLastRow = _
-        loResult.Range.Row + loResult.Range.Rows.Count - 1
+        Set vehicleRows = FetchOFVTransactions( _
+            ofvKey, _
+            identifier, _
+            useVin, _
+            regNo, _
+            vin, _
+            DateFromISO, _
+            dateToISO)
 
-    If lngOutputRows > 0 Then
-        lngNewLastRow = lngOutputRows + 1
+        For Each resultRow In vehicleRows
+
+            ApplySVVVehicleInfo resultRow, vehicleInfo
+
+            If resultRow.Exists( _
+                "FirstRegistrationDate") Then
+
+                If IsDate(resultRow( _
+                    "FirstRegistrationDate")) Then
+
+                    resultRow( _
+                        "FirstRegistrationSource") = _
+                        "Statens vegvesen"
+
+                Else
+                    resultRow( _
+                        "FirstRegistrationSource") = _
+                        statusText
+                End If
+
+            Else
+                resultRow( _
+                    "FirstRegistrationSource") = _
+                    statusText
+            End If
+
+            statusText = VariantToString( _
+                resultRow("Status"))
+
+            If statusText = "OK" Then
+
+                resultRow("TransactionSource") = "OFV"
+                transactionCount = transactionCount + 1
+
+                If Not hitVehicles.Exists(queueKey) Then
+                    hitVehicles.Add queueKey, True
+                End If
+
+            ElseIf Left$(statusText, 5) = "Feil:" Then
+
+                resultRow("TransactionSource") = _
+                    "OFV - " & statusText
+
+                ofvErrorCount = ofvErrorCount + 1
+
+            Else
+
+                resultRow("TransactionSource") = _
+                    "OFV - ingen eierskifter i perioden"
+
+                noTransactionCount = _
+                    noTransactionCount + 1
+
+            End If
+
+            allRows.Add resultRow
+
+        Next resultRow
+
+        API_ShowStatus _
+            "Fullfort", _
+            "Begge datakilder behandlet", _
+            identifier, _
+            currentVehicle, _
+            totalVehicles
+
+        SafePause API_PAUSE_MS
+
+    Next key
+
+    '==========================================================
+    ' RESULTAT
+    '==========================================================
+
+    stage = "oppdaterer Resultat"
+    API_ShowStatus "Excel", "Oppdaterer Resultat"
+
+    outputRows = allRows.Count
+
+    Set loResult = GetOrCreateResultTable( _
+        wsResult, fieldMap)
+
+    oldLastRow = _
+        loResult.Range.Row + _
+        loResult.Range.rows.Count - 1
+
+    If outputRows > 0 Then
+        newLastRow = outputRows + 1
     Else
-        lngNewLastRow = 2
+        newLastRow = 2
     End If
 
-    strStage = "endrer tabellstorrelsen"
-
-    Set loResult = OFV_ResizeResultTable( _
-        wsResult, loResult, lngNewLastRow, lngFieldCount)
-
-    strStage = "tommer gamle data"
+    Set loResult = ResizeResultTable( _
+        wsResult, loResult, newLastRow, fieldCount)
 
     If Not loResult.DataBodyRange Is Nothing Then
         loResult.DataBodyRange.ClearContents
     End If
 
-    If lngOldLastRow > lngNewLastRow Then
+    If oldLastRow > newLastRow Then
 
         With wsResult.Range( _
-            wsResult.Cells(lngNewLastRow + 1, 1), _
-            wsResult.Cells(lngOldLastRow, lngFieldCount))
+            wsResult.Cells(newLastRow + 1, 1), _
+            wsResult.Cells(oldLastRow, fieldCount))
 
             .ClearContents
             .ClearFormats
@@ -313,79 +450,83 @@ Public Sub OFV_RefreshInfo()
 
     End If
 
-    'Fjerner eventuelle gamle hjelpekolonner
-    wsResult.Range("W:AC").Clear
+    wsResult.Range("Y:AC").Clear
 
-    strStage = "oppdaterer overskriftene"
+    For c = LBound(fieldMap) To UBound(fieldMap)
 
-    For m = LBound(objFieldMap) To UBound(objFieldMap)
+        loResult.HeaderRowRange.Cells( _
+            1, c + 1).value = fieldMap(c)(1)
 
-        loResult.HeaderRowRange.Cells(1, m + 1).Value = _
-            objFieldMap(m)(1)
+    Next c
 
-    Next m
+    If outputRows > 0 Then
 
-    If lngOutputRows > 0 Then
+        ReDim output( _
+            1 To outputRows, _
+            1 To fieldCount)
 
-        ReDim arrOutput( _
-            1 To lngOutputRows, _
-            1 To lngFieldCount)
+        For r = 1 To outputRows
 
-        For r = 1 To lngOutputRows
+            Set resultRow = allRows(r)
 
-            Set objRow = colAllRows(r)
+            For c = LBound(fieldMap) To UBound(fieldMap)
 
-            For m = LBound(objFieldMap) To UBound(objFieldMap)
+                dictionaryKey = CStr(fieldMap(c)(0))
 
-                strDictKey = CStr(objFieldMap(m)(0))
+                If dictionaryKey = _
+                    "CalculatedSellerType" Or _
+                   dictionaryKey = _
+                    "CalculatedBuyerType" Then
 
-                If strDictKey = "CalculatedSellerType" Or _
-                   strDictKey = "CalculatedBuyerType" Then
+                    output(r, c + 1) = Empty
 
-                    arrOutput(r, m + 1) = Empty
+                ElseIf resultRow.Exists( _
+                    dictionaryKey) Then
 
-                ElseIf objRow.Exists(strDictKey) Then
+                    value = resultRow(dictionaryKey)
 
-                    varValue = objRow(strDictKey)
-
-                    If IsNull(varValue) Or IsEmpty(varValue) Then
-                        arrOutput(r, m + 1) = Empty
+                    If IsNull(value) Or IsEmpty(value) Then
+                        output(r, c + 1) = Empty
                     Else
-                        arrOutput(r, m + 1) = varValue
+                        output(r, c + 1) = value
                     End If
 
                 Else
-                    arrOutput(r, m + 1) = Empty
+                    output(r, c + 1) = Empty
                 End If
 
-            Next m
+            Next c
 
         Next r
 
-        strStage = "skriver resultatdata"
-
-        loResult.DataBodyRange.Value = arrOutput
-
-        strStage = "oppretter selger og kjoper"
-
-        OFV_ApplyCalculatedColumns loResult
+        loResult.DataBodyRange.value = output
+        ApplyCalculatedColumns loResult
 
     End If
 
-    strStage = "formaterer resultat-tabellen"
+    FormatResultTable wsResult, loResult
 
-    OFV_FormatResultTable wsResult, loResult
+    '==========================================================
+    ' OVERSIKT
+    '==========================================================
 
-    strStage = "oppdaterer oversikten"
+    stage = "oppdaterer Oversikt"
+    API_ShowStatus "Excel", "Oppdaterer Oversikt"
 
-    OFV_UpdateOverviewKPIs wsOverview
-    OFV_RebuildOverviewPivot wsOverview, loResult
+    UpdateOverviewKPIs wsOverview
+    RebuildOverviewPivot wsOverview, loResult
 
-    strStage = "oppdaterer kontrollarket"
+    '==========================================================
+    ' KONTROLLARK
+    '==========================================================
 
-    If Not wsControl Is Nothing Then
-        wsControl.Calculate
-    End If
+    stage = "oppdaterer Kontroll solgte biler"
+
+    API_ShowStatus _
+        "Excel", _
+        "Oppdaterer Kontroll solgte biler"
+
+    UpdateControlSheet wsControl
 
     Application.Calculation = oldCalculation
 
@@ -393,65 +534,862 @@ Public Sub OFV_RefreshInfo()
 
         wsResult.Calculate
         wsOverview.Calculate
-
-        If Not wsControl Is Nothing Then
-            wsControl.Calculate
-        End If
+        wsControl.Calculate
 
     Else
         Application.CalculateFull
     End If
 
-    Application.StatusBar = False
-    Application.Cursor = oldCursor
-    Application.ScreenUpdating = oldScreenUpdating
-    Application.EnableEvents = oldEnableEvents
-    blnApplicationChanged = False
+    API_ShowStatus _
+        "Ferdig", _
+        "Alle data og ark er oppdatert"
+
+    RestoreApplicationState _
+        oldScreenUpdating, _
+        oldEnableEvents, _
+        oldCalculation, _
+        oldCursor
+
+    applicationChanged = False
 
     MsgBox _
-        "OFV: Ferdig." & vbCrLf & vbCrLf & _
-        t & " " & OFV_VehicleWord() & " lest." & vbCrLf & _
-        objHitVehicles.Count & " med treff." & vbCrLf & _
-        lngTransactionRows & " eierskifter funnet." & vbCrLf & _
-        lngNoHit & " uten registreringer i perioden." & vbCrLf & _
-        lngApiErrors & " API-feil." & vbCrLf & vbCrLf & _
-        "Resultat, Oversikt og Kontroll solgte biler er oppdatert.", _
-        vbInformation, "OFV"
+        "Oppdateringen er ferdig." & vbCrLf & vbCrLf & _
+        totalVehicles & " kjoretoy lest." & vbCrLf & _
+        svvDateCount & _
+        " forstegangsregistreringer fra Vegvesenet." & vbCrLf & _
+        transactionCount & _
+        " OFV-eierskifter funnet." & vbCrLf & _
+        noTransactionCount & _
+        " uten OFV-eierskifter i perioden." & vbCrLf & _
+        svvErrorCount & " Vegvesen-feil." & vbCrLf & _
+        ofvErrorCount & " OFV-feil.", _
+        vbInformation, "API-oppdatering"
 
+    Exit Sub
+
+SafeExit:
+
+    Application.StatusBar = False
     Exit Sub
 
 FatalError:
 
-    Dim lngErrorNumber As Long
-    Dim strErrorDescription As String
+    Dim errorNumber As Long
+    Dim errorDescription As String
 
-    lngErrorNumber = Err.Number
-    strErrorDescription = Err.Description
+    errorNumber = Err.Number
+    errorDescription = Err.Description
 
-    If blnApplicationChanged Then
+    Application.StatusBar = False
 
-        Application.StatusBar = False
-        Application.Cursor = oldCursor
-        Application.ScreenUpdating = oldScreenUpdating
-        Application.EnableEvents = oldEnableEvents
-        Application.Calculation = oldCalculation
+    If applicationChanged Then
+
+        RestoreApplicationState _
+            oldScreenUpdating, _
+            oldEnableEvents, _
+            oldCalculation, _
+            oldCursor
 
     End If
 
     MsgBox _
         "Oppdateringen ble avbrutt." & vbCrLf & vbCrLf & _
-        "Trinn: " & strStage & vbCrLf & _
-        "Feil " & lngErrorNumber & ": " & strErrorDescription, _
-        vbCritical, "OFV"
+        "Trinn: " & stage & vbCrLf & _
+        "Feil " & errorNumber & ": " & _
+        errorDescription, _
+        vbCritical, "API-oppdatering"
 
 End Sub
 
 
 '==============================================================
-' FORMELKOLONNER
+' STATUSLINJE
 '==============================================================
 
-Private Sub OFV_ApplyCalculatedColumns(ByVal lo As ListObject)
+Private Sub API_ShowStatus( _
+    ByVal sourceName As String, _
+    ByVal activity As String, _
+    Optional ByVal identifier As String = "", _
+    Optional ByVal currentVehicle As Long = 0, _
+    Optional ByVal totalVehicles As Long = 0)
+
+    Dim message As String
+    Dim percentage As Double
+
+    message = sourceName & " | " & activity
+
+    If currentVehicle > 0 And totalVehicles > 0 Then
+
+        percentage = currentVehicle / totalVehicles
+
+        message = message & _
+            " | " & currentVehicle & _
+            " av " & totalVehicles
+
+        message = message & _
+            " | " & Format$(percentage, "0%")
+
+    End If
+
+    If Len(identifier) > 0 Then
+        message = message & " | " & identifier
+    End If
+
+    Application.StatusBar = message
+    DoEvents
+
+End Sub
+
+
+Private Sub RestoreApplicationState( _
+    ByVal screenUpdatingValue As Boolean, _
+    ByVal enableEventsValue As Boolean, _
+    ByVal calculationValue As XlCalculation, _
+    ByVal cursorValue As Variant)
+
+    Application.StatusBar = False
+    Application.cursor = cursorValue
+    Application.ScreenUpdating = screenUpdatingValue
+    Application.EnableEvents = enableEventsValue
+    Application.Calculation = calculationValue
+
+End Sub
+
+
+'==============================================================
+' STATENS VEGVESEN
+'==============================================================
+
+Private Function FetchVehicleInfoFromSVV( _
+    ByVal apiKey As String, _
+    ByVal regNo As String, _
+    ByVal vin As String) As Object
+
+    Dim result As Object
+    Dim responseText As String
+    Dim statusText As String
+    Dim isoDate As String
+
+    Set result = CreateObject("Scripting.Dictionary")
+    result.CompareMode = vbTextCompare
+    result("Status") = _
+        "Statens vegvesen - ingen dato"
+
+    If Len(regNo) > 0 Then
+
+        responseText = GetSVVResponse( _
+            apiKey, "kjennemerke", regNo, statusText)
+
+    End If
+
+    If Len(responseText) = 0 And Len(vin) > 0 Then
+
+        responseText = GetSVVResponse( _
+            apiKey, "understellsnummer", vin, statusText)
+
+    End If
+
+    If Len(responseText) = 0 Then
+
+        If Len(statusText) > 0 Then
+            result("Status") = statusText
+        End If
+
+        Set FetchVehicleInfoFromSVV = result
+        Exit Function
+
+    End If
+
+    isoDate = VariantToString( _
+        JSON_ExtractValue( _
+            responseText, _
+            "registrertForstegangNorgeDato"))
+
+    If Len(isoDate) < 10 Then
+
+        isoDate = VariantToString( _
+            JSON_ExtractValue( _
+                responseText, _
+                "registrertForstegangDato"))
+
+    End If
+
+    If Len(isoDate) >= 10 Then
+
+        result("FirstRegistrationDate") = _
+            DateFromISO(isoDate)
+
+        result("Status") = "Statens vegvesen"
+
+    End If
+
+    Set FetchVehicleInfoFromSVV = result
+
+End Function
+
+
+Private Function GetSVVResponse( _
+    ByVal apiKey As String, _
+    ByVal filterName As String, _
+    ByVal identifier As String, _
+    ByRef statusText As String) As String
+
+    Dim http As Object
+    Dim url As String
+    Dim attempt As Long
+    Dim statusCode As Long
+    Dim responseText As String
+    Dim lastError As String
+
+    url = SVV_URL & filterName & "=" & identifier
+    statusText = vbNullString
+
+    For attempt = 1 To MAX_RETRIES
+
+        Set http = CreateObject( _
+            "MSXML2.ServerXMLHTTP.6.0")
+
+        statusCode = 0
+        responseText = vbNullString
+
+        On Error Resume Next
+
+        http.Open "GET", url, False
+
+        http.setRequestHeader _
+            "SVV-Authorization", _
+            "Apikey " & apiKey
+
+        http.setRequestHeader _
+            "Accept", "application/json"
+
+        http.setTimeouts _
+            10000, 10000, 30000, 30000
+
+        http.Send
+
+        statusCode = http.Status
+        responseText = http.responseText
+
+        If Err.Number <> 0 Then
+
+            lastError = Err.Description
+            statusCode = 0
+            Err.Clear
+
+        End If
+
+        On Error GoTo 0
+
+        Select Case statusCode
+
+            Case 200
+                statusText = "Statens vegvesen"
+                GetSVVResponse = responseText
+                Exit Function
+
+            Case 401
+                statusText = _
+                    "Feil: Vegvesenet 401 - kontroller API-nokkel"
+                Exit Function
+
+            Case 403
+                statusText = _
+                    "Feil: Vegvesenet 403 - tilgang eller kvote"
+                Exit Function
+
+            Case 404
+                statusText = _
+                    "Statens vegvesen - ingen treff"
+                Exit Function
+
+            Case 429, 500, 502, 503, 504
+
+                lastError = _
+                    CStr(statusCode) & ": " & responseText
+
+                SafePause RETRY_WAIT_MS * attempt
+
+            Case Else
+
+                If statusCode <> 0 Then
+
+                    statusText = _
+                        "Feil: Vegvesenet HTTP " & statusCode
+
+                    Exit Function
+
+                Else
+                    SafePause RETRY_WAIT_MS * attempt
+                End If
+
+        End Select
+
+    Next attempt
+
+    statusText = "Feil: Vegvesenet - " & lastError
+
+End Function
+
+
+Private Sub ApplySVVVehicleInfo( _
+    ByVal resultRow As Object, _
+    ByVal vehicleInfo As Object)
+
+    If vehicleInfo Is Nothing Then Exit Sub
+
+    If vehicleInfo.Exists( _
+        "FirstRegistrationDate") Then
+
+        If IsDate(vehicleInfo( _
+            "FirstRegistrationDate")) Then
+
+            resultRow("FirstRegistrationDate") = _
+                vehicleInfo("FirstRegistrationDate")
+
+        End If
+
+    End If
+
+End Sub
+
+
+'==============================================================
+' OFV-TRANSAKSJONER
+'==============================================================
+
+Private Function FetchOFVTransactions( _
+    ByVal apiKey As String, _
+    ByVal identifier As String, _
+    ByVal useVin As Boolean, _
+    ByVal originalRegNo As String, _
+    ByVal originalVin As String, _
+    ByVal DateFromISO As String, _
+    ByVal dateToISO As String) As Collection
+
+    Dim rows As New Collection
+    Dim items As Collection
+
+    Dim filterKey As String
+    Dim cursor As String
+    Dim body As String
+    Dim statusText As String
+    Dim responseText As String
+    Dim transactionsJSON As String
+    Dim paginationJSON As String
+
+    Dim item As Variant
+    Dim hasNextValue As Variant
+    Dim cursorValue As Variant
+    Dim hasNext As Boolean
+
+    If useVin Then
+        filterKey = "chassisNumber"
+    Else
+        filterKey = "regNo"
+    End If
+
+    cursor = vbNullString
+
+    Do
+
+        body = "{""filters"":{"
+        body = body & """" & filterKey & """:"""
+        body = body & JsonEscape(identifier) & ""","
+        body = body & """transactionDateFrom"":"""
+        body = body & DateFromISO & ""","
+        body = body & """transactionDateTo"":"""
+        body = body & dateToISO & """},"
+        body = body & """pagination"":{""first"":1000"
+
+        If Len(cursor) > 0 Then
+            body = body & ",""cursor"":"""
+            body = body & JsonEscape(cursor) & """"
+        End If
+
+        body = body & "},"
+        body = body & """sorting"":{"
+        body = body & """orderBy"":""transactionDate"","
+        body = body & """orderDirection"":""ASC""}}"
+
+        responseText = PostOFVWithRetries( _
+            apiKey, body, statusText)
+
+        If statusText <> "OK" Then
+
+            rows.Add BuildEmptyTransactionRow( _
+                identifier, useVin, originalRegNo, _
+                originalVin, statusText)
+
+            Set FetchOFVTransactions = rows
+            Exit Function
+
+        End If
+
+        transactionsJSON = JSON_ExtractObject( _
+            responseText, "transactions")
+
+        Set items = JSON_ArrayAllElements( _
+            transactionsJSON)
+
+        For Each item In items
+
+            rows.Add BuildTransactionRow( _
+                identifier, CStr(item), useVin, _
+                originalRegNo, originalVin)
+
+        Next item
+
+        paginationJSON = JSON_ExtractObject( _
+            responseText, "pagination")
+
+        hasNextValue = JSON_ExtractValue( _
+            paginationJSON, "hasNextPage")
+
+        cursorValue = JSON_ExtractValue( _
+            paginationJSON, "endCursor")
+
+        hasNext = False
+
+        Select Case VarType(hasNextValue)
+
+            Case vbBoolean
+                hasNext = CBool(hasNextValue)
+
+            Case vbString
+                hasNext = _
+                    (LCase$(CStr(hasNextValue)) = "true")
+
+            Case vbByte, vbInteger, vbLong
+                hasNext = (hasNextValue <> 0)
+
+            Case vbSingle, vbDouble, vbCurrency
+                hasNext = (hasNextValue <> 0)
+
+        End Select
+
+        If hasNext Then
+
+            If IsNull(cursorValue) Then Exit Do
+            If IsEmpty(cursorValue) Then Exit Do
+
+            cursor = CStr(cursorValue)
+
+            If Len(cursor) = 0 Then Exit Do
+
+            SafePause API_PAUSE_MS
+
+        Else
+            Exit Do
+        End If
+
+    Loop
+
+    If rows.Count = 0 Then
+
+        rows.Add BuildEmptyTransactionRow( _
+            identifier, useVin, originalRegNo, _
+            originalVin, _
+            "Ingen eierskifter i perioden")
+
+    End If
+
+    Set FetchOFVTransactions = rows
+
+End Function
+
+
+Private Function BuildEmptyTransactionRow( _
+    ByVal identifier As String, _
+    ByVal useVin As Boolean, _
+    ByVal originalRegNo As String, _
+    ByVal originalVin As String, _
+    ByVal statusText As String) As Object
+
+    Dim result As Object
+
+    Set result = CreateObject("Scripting.Dictionary")
+    result.CompareMode = vbTextCompare
+
+    result("Input") = identifier
+
+    If useVin Then
+        result("Kilde") = "VIN"
+    Else
+        result("Kilde") = "Regnr"
+    End If
+
+    result("RegNo") = originalRegNo
+    result("ChassisNumber") = originalVin
+    result("Status") = statusText
+
+    Set BuildEmptyTransactionRow = result
+
+End Function
+
+
+Private Function BuildTransactionRow( _
+    ByVal identifier As String, _
+    ByVal transactionJSON As String, _
+    ByVal useVin As Boolean, _
+    ByVal originalRegNo As String, _
+    ByVal originalVin As String) As Object
+
+    Dim result As Object
+    Dim fromJSON As String
+    Dim toJSON As String
+    Dim fromOwnerJSON As String
+    Dim toOwnerJSON As String
+    Dim companyJSON As String
+    Dim extractedValue As Variant
+
+    Set result = CreateObject("Scripting.Dictionary")
+    result.CompareMode = vbTextCompare
+
+    result("Input") = identifier
+
+    If useVin Then
+        result("Kilde") = "VIN"
+    Else
+        result("Kilde") = "Regnr"
+    End If
+
+    extractedValue = JSON_ExtractValue( _
+        transactionJSON, "regNo")
+
+    If Len(VariantToString(extractedValue)) > 0 Then
+        result("RegNo") = extractedValue
+    Else
+        result("RegNo") = originalRegNo
+    End If
+
+    extractedValue = JSON_ExtractValue( _
+        transactionJSON, "chassisNumber")
+
+    If Len(VariantToString(extractedValue)) > 0 Then
+        result("ChassisNumber") = extractedValue
+    Else
+        result("ChassisNumber") = originalVin
+    End If
+
+    result("MakeName") = _
+        JSON_ExtractValue(transactionJSON, "makeName")
+
+    result("ModelName") = _
+        JSON_ExtractValue(transactionJSON, "modelName")
+
+    result("RegistrationType") = _
+        JSON_ExtractValue(transactionJSON, "registrationType")
+
+    result("FuelGroup") = _
+        JSON_ExtractValue(transactionJSON, "fuelGroup")
+
+    result("IsLeased") = _
+        JSON_ExtractValue(transactionJSON, "isLeased")
+
+    result("IsUsedImported") = _
+        JSON_ExtractValue(transactionJSON, "isUsedImported")
+
+    result("FirstRegistrationDate") = Empty
+
+    result("TransactionNumber") = _
+        JSON_ExtractValue(transactionJSON, "transactionNumber")
+
+    result("TransactionDate") = _
+        DateFromISO(VariantToString( _
+            JSON_ExtractValue( _
+                transactionJSON, "transactionDate")))
+
+    fromJSON = JSON_ExtractObject(transactionJSON, "from")
+    toJSON = JSON_ExtractObject(transactionJSON, "to")
+
+    fromOwnerJSON = JSON_ExtractObject(fromJSON, "owner")
+    toOwnerJSON = JSON_ExtractObject(toJSON, "owner")
+
+    result("FromOwnerType") = _
+        JSON_ExtractValue(fromOwnerJSON, "type")
+
+    companyJSON = _
+        JSON_ExtractObject(fromOwnerJSON, "companyInfo")
+
+    result("FromOwnerCompanyName") = _
+        JSON_ExtractValue(companyJSON, "name")
+
+    result("FromOwnerCounty") = _
+        JSON_ExtractValue(fromOwnerJSON, "countyName")
+
+    result("ToOwnerType") = _
+        JSON_ExtractValue(toOwnerJSON, "type")
+
+    companyJSON = _
+        JSON_ExtractObject(toOwnerJSON, "companyInfo")
+
+    result("ToOwnerCompanyName") = _
+        JSON_ExtractValue(companyJSON, "name")
+
+    result("ToOwnerCounty") = _
+        JSON_ExtractValue(toOwnerJSON, "countyName")
+
+    result("Status") = "OK"
+
+    Set BuildTransactionRow = result
+
+End Function
+
+
+Private Function PostOFVWithRetries( _
+    ByVal apiKey As String, _
+    ByVal body As String, _
+    ByRef statusText As String) As String
+
+    Dim attempt As Long
+    Dim statusCode As Long
+    Dim lastError As String
+    Dim responseText As String
+    Dim http As Object
+
+    statusText = "OK"
+
+    For attempt = 1 To MAX_RETRIES
+
+        Set http = CreateObject( _
+            "MSXML2.ServerXMLHTTP.6.0")
+
+        statusCode = 0
+        responseText = vbNullString
+
+        On Error Resume Next
+
+        http.Open "POST", OFV_URL, False
+
+        http.setRequestHeader _
+            "Ocp-Apim-Subscription-Key", apiKey
+
+        http.setRequestHeader _
+            "Content-Type", "application/json"
+
+        http.setTimeouts _
+            10000, 10000, 30000, 30000
+
+        http.Send body
+
+        statusCode = http.Status
+        responseText = http.responseText
+
+        If Err.Number <> 0 Then
+            lastError = Err.Description
+            statusCode = 0
+            Err.Clear
+        End If
+
+        On Error GoTo 0
+
+        Select Case statusCode
+
+            Case 200
+                PostOFVWithRetries = responseText
+                Exit Function
+
+            Case 401
+                statusText = _
+                    "Feil: OFV 401 - kontroller API-nokkelen"
+                Exit Function
+
+            Case 403
+                statusText = _
+                    "Feil: OFV 403 - tilgang eller kvote"
+                Exit Function
+
+            Case 429, 500, 502, 503, 504
+
+                lastError = _
+                    CStr(statusCode) & ": " & responseText
+
+                SafePause RETRY_WAIT_MS * attempt
+
+            Case Else
+
+                If statusCode <> 0 Then
+
+                    statusText = _
+                        "Feil: OFV HTTP " & statusCode
+
+                    Exit Function
+
+                Else
+                    SafePause RETRY_WAIT_MS * attempt
+                End If
+
+        End Select
+
+    Next attempt
+
+    statusText = "Feil: OFV - " & lastError
+
+End Function
+
+
+'==============================================================
+' FELTMAPPING - 24 KOLONNER A:X
+'==============================================================
+
+Private Function GetFieldMap() As Variant
+
+    Dim fields(0 To 23) As Variant
+
+    fields(0) = Array("Input", "Input", False)
+    fields(1) = Array("Kilde", "Kilde", False)
+    fields(2) = Array("RegNo", "RegNo", False)
+    fields(3) = Array( _
+        "ChassisNumber", "Chassisnummer", False)
+    fields(4) = Array("MakeName", "Merke", False)
+    fields(5) = Array("ModelName", "Modell", False)
+    fields(6) = Array( _
+        "RegistrationType", "RegistreringsType", False)
+    fields(7) = Array( _
+        "FuelGroup", "Drivstoffgruppe", False)
+    fields(8) = Array("IsLeased", "Leaset", False)
+    fields(9) = Array( _
+        "IsUsedImported", "Bruktimportert", False)
+    fields(10) = Array( _
+        "FirstRegistrationDate", _
+        "ForstegangsRegistrering", True)
+    fields(11) = Array( _
+        "TransactionNumber", _
+        "TransaksjonsNummer", False)
+    fields(12) = Array( _
+        "TransactionDate", _
+        "Eierskiftedato", True)
+    fields(13) = Array( _
+        "CalculatedSellerType", _
+        "SelgerType", False)
+    fields(14) = Array( _
+        "CalculatedBuyerType", _
+        BuyerTypeHeader(), False)
+    fields(15) = Array( _
+        "FromOwnerType", _
+        "SelgerEierType", False)
+    fields(16) = Array( _
+        "FromOwnerCompanyName", _
+        "SelgerEierFirma", False)
+    fields(17) = Array( _
+        "FromOwnerCounty", _
+        "SelgerEierFylke", False)
+    fields(18) = Array( _
+        "ToOwnerType", _
+        "KjoperEierType", False)
+    fields(19) = Array( _
+        "ToOwnerCompanyName", _
+        "KjoperEierFirma", False)
+    fields(20) = Array( _
+        "ToOwnerCounty", BuyerCountyHeader(), False)
+    fields(21) = Array("Status", "Status", False)
+    fields(22) = Array( _
+        "FirstRegistrationSource", _
+        FirstRegistrationSourceHeader(), False)
+    fields(23) = Array( _
+        "TransactionSource", "EierskifteKilde", False)
+
+    GetFieldMap = fields
+
+End Function
+
+
+'==============================================================
+' RESULTATTABELL
+'==============================================================
+
+Private Function GetOrCreateResultTable( _
+    ByVal ws As Worksheet, _
+    ByVal fieldMap As Variant) As ListObject
+
+    Dim lo As ListObject
+    Dim target As Range
+    Dim fieldCount As Long
+    Dim c As Long
+
+    fieldCount = UBound(fieldMap) + 1
+
+    On Error Resume Next
+    Set lo = ws.ListObjects(RESULT_TABLE)
+    On Error GoTo 0
+
+    If lo Is Nothing Then
+
+        For c = LBound(fieldMap) To UBound(fieldMap)
+            ws.Cells(1, c + 1).value = fieldMap(c)(1)
+        Next c
+
+        Set target = ws.Range( _
+            ws.Cells(1, 1), _
+            ws.Cells(2, fieldCount))
+
+        Set lo = ws.ListObjects.Add( _
+            xlSrcRange, target, , xlYes)
+
+        lo.Name = RESULT_TABLE
+        lo.DataBodyRange.ClearContents
+
+    End If
+
+    Set GetOrCreateResultTable = lo
+
+End Function
+
+
+Private Function ResizeResultTable( _
+    ByVal ws As Worksheet, _
+    ByVal lo As ListObject, _
+    ByVal lastRow As Long, _
+    ByVal fieldCount As Long) As ListObject
+
+    Dim target As Range
+    Dim styleName As String
+
+    Set target = ws.Range( _
+        ws.Cells(1, 1), _
+        ws.Cells(lastRow, fieldCount))
+
+    styleName = lo.TableStyle
+
+    On Error Resume Next
+
+    If ws.FilterMode Then ws.ShowAllData
+
+    lo.AutoFilter.ShowAllData
+    lo.ShowAutoFilter = False
+
+    Err.Clear
+    lo.Resize target
+
+    If Err.Number <> 0 Then
+
+        Err.Clear
+        lo.Unlist
+
+        Set lo = ws.ListObjects.Add( _
+            xlSrcRange, target, , xlYes)
+
+        lo.Name = RESULT_TABLE
+
+    End If
+
+    On Error GoTo 0
+
+    lo.ShowAutoFilter = True
+
+    If Len(styleName) > 0 Then
+        lo.TableStyle = styleName
+    Else
+        lo.TableStyle = "TableStyleMedium2"
+    End If
+
+    Set ResizeResultTable = lo
+
+End Function
+
+
+Private Sub ApplyCalculatedColumns(ByVal lo As ListObject)
 
     If lo.DataBodyRange Is Nothing Then Exit Sub
 
@@ -466,7 +1404,7 @@ Private Sub OFV_ApplyCalculatedColumns(ByVal lo As ListObject)
 
     End With
 
-    With lo.ListColumns(OFV_BuyerTypeHeader()).DataBodyRange
+    With lo.ListColumns(BuyerTypeHeader()).DataBodyRange
 
         .Formula = _
             "=IF(AND([@KjoperEierType]=""""," & _
@@ -477,136 +1415,36 @@ Private Sub OFV_ApplyCalculatedColumns(ByVal lo As ListObject)
 
     End With
 
-    lo.ListColumns("SelgerType").DataBodyRange.Calculate
-    lo.ListColumns(OFV_BuyerTypeHeader()).DataBodyRange.Calculate
-
 End Sub
 
 
-'==============================================================
-' RESULTATTABELL
-'==============================================================
-
-Private Function OFV_GetOrCreateResultTable( _
-    ByVal ws As Worksheet, _
-    ByVal objFieldMap As Variant) As ListObject
-
-    Dim lo As ListObject
-    Dim rngTable As Range
-    Dim lngFieldCount As Long
-    Dim m As Long
-
-    lngFieldCount = UBound(objFieldMap) + 1
-
-    On Error Resume Next
-    Set lo = ws.ListObjects(RESULT_TABLE)
-    On Error GoTo 0
-
-    If lo Is Nothing Then
-
-        For m = LBound(objFieldMap) To UBound(objFieldMap)
-            ws.Cells(1, m + 1).Value = objFieldMap(m)(1)
-        Next m
-
-        Set rngTable = ws.Range( _
-            ws.Cells(1, 1), _
-            ws.Cells(2, lngFieldCount))
-
-        Set lo = ws.ListObjects.Add( _
-            xlSrcRange, rngTable, , xlYes)
-
-        lo.Name = RESULT_TABLE
-        lo.DataBodyRange.ClearContents
-
-    End If
-
-    Set OFV_GetOrCreateResultTable = lo
-
-End Function
-
-
-Private Function OFV_ResizeResultTable( _
-    ByVal ws As Worksheet, _
-    ByVal lo As ListObject, _
-    ByVal lngLastRow As Long, _
-    ByVal lngFieldCount As Long) As ListObject
-
-    Dim rngTarget As Range
-    Dim strStyle As String
-
-    Set rngTarget = ws.Range( _
-        ws.Cells(1, 1), _
-        ws.Cells(lngLastRow, lngFieldCount))
-
-    strStyle = lo.TableStyle
-
-    On Error Resume Next
-
-    If ws.FilterMode Then ws.ShowAllData
-    lo.AutoFilter.ShowAllData
-    lo.ShowAutoFilter = False
-
-    Err.Clear
-    lo.Resize rngTarget
-
-    If Err.Number <> 0 Then
-
-        Err.Clear
-        lo.Unlist
-
-        Set lo = ws.ListObjects.Add( _
-            xlSrcRange, rngTarget, , xlYes)
-
-        lo.Name = RESULT_TABLE
-
-    End If
-
-    On Error GoTo 0
-
-    lo.ShowAutoFilter = True
-
-    If Len(strStyle) > 0 Then
-        lo.TableStyle = strStyle
-    Else
-        lo.TableStyle = "TableStyleMedium2"
-    End If
-
-    Set OFV_ResizeResultTable = lo
-
-End Function
-
-
-'==============================================================
-' FORMATER RESULTATTABELL
-'==============================================================
-
-Private Sub OFV_FormatResultTable( _
+Private Sub FormatResultTable( _
     ByVal ws As Worksheet, _
     ByVal lo As ListObject)
 
-    Dim lngLastRow As Long
-    Dim r As Long
-    Dim strCurrentKey As String
-    Dim strPreviousKey As String
+    Dim lastRow As Long
 
-    lngLastRow = _
-        lo.Range.Row + lo.Range.Rows.Count - 1
+    lastRow = lo.Range.Row + lo.Range.rows.Count - 1
 
     lo.TableStyle = "TableStyleMedium2"
     lo.ShowTableStyleRowStripes = False
     lo.ShowAutoFilter = True
 
     With lo.HeaderRowRange
-
         .Font.Bold = True
         .Font.Color = RGB(255, 255, 255)
         .Interior.Color = RGB(31, 78, 120)
         .HorizontalAlignment = xlCenter
         .VerticalAlignment = xlCenter
         .WrapText = True
-        .RowHeight = 30
-
+        .RowHeight = 34
     End With
+
+    If lastRow >= 2 Then
+        ws.Range("K2:K" & lastRow).NumberFormat = "dd.mm.yyyy"
+        ws.Range("L2:L" & lastRow).NumberFormat = "0"
+        ws.Range("M2:M" & lastRow).NumberFormat = "dd.mm.yyyy"
+    End If
 
     ws.Columns("A").ColumnWidth = 10
     ws.Columns("B").ColumnWidth = 9
@@ -616,121 +1454,176 @@ Private Sub OFV_FormatResultTable( _
     ws.Columns("F").ColumnWidth = 14
     ws.Columns("G").ColumnWidth = 24
     ws.Columns("H").ColumnWidth = 15
-    ws.Columns("I").ColumnWidth = 9
-    ws.Columns("J").ColumnWidth = 12
-    ws.Columns("K").ColumnWidth = 14
-    ws.Columns("L").ColumnWidth = 11
-    ws.Columns("M").ColumnWidth = 14
-    ws.Columns("N").ColumnWidth = 25
-    ws.Columns("O").ColumnWidth = 25
+    ws.Columns("I:J").ColumnWidth = 12
+    ws.Columns("K:M").ColumnWidth = 16
+    ws.Columns("N:O").ColumnWidth = 25
     ws.Columns("P").ColumnWidth = 13
     ws.Columns("Q").ColumnWidth = 25
-    ws.Columns("R").ColumnWidth = 13
-    ws.Columns("S").ColumnWidth = 13
+    ws.Columns("R:S").ColumnWidth = 13
     ws.Columns("T").ColumnWidth = 25
     ws.Columns("U").ColumnWidth = 15
     ws.Columns("V").ColumnWidth = 28
-
-    'Skjulte stottekolonner
-    ws.Columns("A:B").Hidden = True
-    ws.Columns("G").Hidden = True
-    ws.Columns("P:Q").Hidden = True
-    ws.Columns("S:T").Hidden = True
-
-    'Synlige resultatkolonner
-    ws.Columns("C:F").Hidden = False
-    ws.Columns("H:O").Hidden = False
-    ws.Columns("R").Hidden = False
-    ws.Columns("U:V").Hidden = False
-
-    If lngLastRow < 2 Then Exit Sub
-
-    With ws.Range("A2:V" & lngLastRow)
-
-        .VerticalAlignment = xlCenter
-        .Font.Color = RGB(31, 31, 31)
-        .Font.Bold = False
-        .Interior.Pattern = xlSolid
-        .Interior.Color = RGB(255, 255, 255)
-        .WrapText = False
-        .RowHeight = 18
-
-    End With
-
-    ws.Range("K2:K" & lngLastRow).NumberFormat = "dd.mm.yyyy"
-    ws.Range("L2:L" & lngLastRow).NumberFormat = "0"
-    ws.Range("M2:M" & lngLastRow).NumberFormat = "dd.mm.yyyy"
-
-    For r = 2 To lngLastRow
-
-        strCurrentKey = Trim$(CStr( _
-            ws.Cells(r, "A").Value & vbNullString))
-
-        If r = 2 Then
-            strPreviousKey = vbNullString
-        Else
-            strPreviousKey = Trim$(CStr( _
-                ws.Cells(r - 1, "A").Value & vbNullString))
-        End If
-
-        With ws.Range("A" & r & ":V" & r)
-
-            .Borders(xlEdgeTop).LineStyle = xlNone
-            .Borders(xlEdgeBottom).LineStyle = xlNone
-
-        End With
-
-        If r = 2 Or strCurrentKey <> strPreviousKey Then
-
-            With ws.Range("A" & r & ":V" & r)
-
-                .Interior.Color = RGB(217, 234, 247)
-                .Font.Color = RGB(31, 31, 31)
-                .Font.Bold = True
-
-                With .Borders(xlEdgeTop)
-                    .LineStyle = xlContinuous
-                    .Weight = xlMedium
-                    .Color = RGB(91, 155, 213)
-                End With
-
-            End With
-
-        End If
-
-        With ws.Range("A" & r & ":V" & r) _
-            .Borders(xlEdgeBottom)
-
-            .LineStyle = xlContinuous
-            .Weight = xlHairline
-            .Color = RGB(217, 217, 217)
-
-        End With
-
-        If ws.Cells(r, "V").Value <> "OK" Then
-
-            With ws.Cells(r, "V")
-                .Interior.Color = RGB(255, 235, 156)
-                .Font.Color = RGB(156, 101, 0)
-                .Font.Bold = True
-            End With
-
-        End If
-
-    Next r
+    ws.Columns("W").ColumnWidth = 26
+    ws.Columns("X").ColumnWidth = 30
 
 End Sub
 
 
 '==============================================================
-' OVERSIKT OG PIVOT
+' KONTROLL SOLGTE BILER
 '==============================================================
 
-Private Sub OFV_UpdateOverviewKPIs(ByVal ws As Worksheet)
+Private Sub UpdateControlSheet(ByVal ws As Worksheet)
+
+    Dim loInput As ListObject
+    Dim inputData As Variant
+    Dim inputCount As Long
+    Dim lastRow As Long
+    Dim r As Long
+
+    Set loInput = ThisWorkbook.Worksheets( _
+        INPUT_SHEET).ListObjects(INPUT_TABLE)
+
+    If Not loInput.DataBodyRange Is Nothing Then
+
+        inputData = loInput.DataBodyRange.Value2
+
+        For r = 1 To UBound(inputData, 1)
+
+            If Len(Trim$(CStr( _
+                inputData(r, 1) & vbNullString))) > 0 Or _
+               Len(Trim$(CStr( _
+                inputData(r, 2) & vbNullString))) > 0 Then
+
+                inputCount = inputCount + 1
+
+            End If
+
+        Next r
+
+    End If
+
+    lastRow = 9 + Application.Max(1, inputCount)
+
+    'Den permanente spillformelen ligger i A10.
+    'Den skal aldri slettes eller skrives pa nytt.
+    If Not ws.Range("A10").HasFormula Then
+
+        Err.Raise vbObjectError + 1100, _
+            "UpdateControlSheet", _
+            "Den dynamiske formelen mangler i " & _
+            CONTROL_SHEET & "!A10."
+
+    End If
+
+    ws.Range("A9").value = _
+        "Datakilde naermeste hendelse"
+
+    ws.Range("B9").value = "Regnr / input"
+    ws.Range("C9").value = "Chassisnummer"
+    ws.Range("D9").value = "Modell"
+    ws.Range("E9").value = "Bokfort dato"
+    ws.Range("F9").value = "Forstegangsregistrert"
+    ws.Range("G9").value = "Naermeste eierskiftedato"
+    ws.Range("H9").value = "Naermeste hendelse"
+    ws.Range("I9").value = "Dager avvik"
+    ws.Range("J9").value = "Kontrollert"
+    ws.Range("K9").value = "Selger ved eierskifte"
+    ws.Range("L9").value = "Kjoper ved eierskifte"
+    ws.Range("M9").value = "Status eierskifte"
+
+    ws.Range("A5").Formula2 = _
+        "=SUMPRODUCT(--(((KjoretoyInput[Regnr]<>"""")+" & _
+        "(KjoretoyInput[VIN]<>""""))>0))"
+
+    ws.Range("C5").Formula2 = _
+        "=COUNTIF(INDEX(A10#,0,10),""Ja"")"
+
+    ws.Range("E5").Formula2 = _
+        "=IFERROR(ROWS(FILTER(INDEX(A10#,0,2)," & _
+        "(INDEX(A10#,0,9)=0)*" & _
+        "(INDEX(A10#,0,10)=""Ja""))),0)"
+
+    ws.Range("I6").Formula2 = _
+        "=COUNTIFS(INDEX(A10#,0,9),0," & _
+        "INDEX(A10#,0,10),""Ja"")"
+
+    ws.Range("J6").Formula2 = _
+        "=COUNTIFS(INDEX(A10#,0,9),"">=1""," & _
+        "INDEX(A10#,0,9),""<=15""," & _
+        "INDEX(A10#,0,10),""Ja"")"
+
+    ws.Range("K6").Formula2 = _
+        "=COUNTIFS(INDEX(A10#,0,9),"">15""," & _
+        "INDEX(A10#,0,10),""Ja"")"
+
+    ws.Range("A10").Calculate
+    ws.Calculate
+
+    FormatControlSheet ws, lastRow
+
+End Sub
+
+
+Private Sub FormatControlSheet( _
+    ByVal ws As Worksheet, _
+    ByVal lastRow As Long)
+
+    Dim dataRange As Range
+    Dim fullRange As Range
+
+    Set dataRange = ws.Range("A10:M" & lastRow)
+    Set fullRange = ws.Range("A9:M" & lastRow)
+
+    With ws.Range("A9:M9")
+        .Font.Bold = True
+        .Font.Color = RGB(255, 255, 255)
+        .Interior.Color = RGB(31, 78, 120)
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+        .WrapText = True
+        .RowHeight = 34
+    End With
+
+    With dataRange
+        .Font.Size = 10
+        .Font.Color = RGB(31, 31, 31)
+        .VerticalAlignment = xlCenter
+        .Interior.Color = RGB(255, 255, 255)
+        .RowHeight = 18
+    End With
+
+    With fullRange.Borders
+        .LineStyle = xlContinuous
+        .Color = RGB(217, 226, 243)
+        .Weight = xlThin
+    End With
+
+    ws.Range("E10:G" & lastRow).NumberFormat = "dd.mm.yyyy"
+    ws.Range("I10:I" & lastRow).NumberFormat = "0"
+
+    ws.Columns("A").ColumnWidth = 24
+    ws.Columns("B").ColumnWidth = 14
+    ws.Columns("C").ColumnWidth = 22
+    ws.Columns("D").ColumnWidth = 18
+    ws.Columns("E:G").ColumnWidth = 16
+    ws.Columns("H").ColumnWidth = 24
+    ws.Columns("I:J").ColumnWidth = 12
+    ws.Columns("K:L").ColumnWidth = 25
+    ws.Columns("M").ColumnWidth = 28
+
+End Sub
+
+
+'==============================================================
+' OVERSIKT
+'==============================================================
+
+Private Sub UpdateOverviewKPIs(ByVal ws As Worksheet)
 
     ws.Range("A5").Formula = _
-        "=SUMPRODUCT(--((KjoretoyInput[Regnr]<>"""")+" & _
-        "(KjoretoyInput[VIN]<>"""")>0))"
+        "=SUMPRODUCT(--(((KjoretoyInput[Regnr]<>"""")+" & _
+        "(KjoretoyInput[VIN]<>""""))>0))"
 
     ws.Range("C5").Formula = _
         "=COUNTIF(Transaksjoner[Status],""OK"")"
@@ -741,14 +1634,14 @@ Private Sub OFV_UpdateOverviewKPIs(ByVal ws As Worksheet)
 End Sub
 
 
-Private Sub OFV_RebuildOverviewPivot( _
+Private Sub RebuildOverviewPivot( _
     ByVal ws As Worksheet, _
     ByVal lo As ListObject)
 
     Dim pc As PivotCache
     Dim pt As PivotTable
     Dim pf As PivotField
-    Dim arrFields As Variant
+    Dim fields As Variant
     Dim i As Long
 
     Do While ws.PivotTables.Count > 0
@@ -763,34 +1656,38 @@ Private Sub OFV_RebuildOverviewPivot( _
         TableDestination:=ws.Range("A11"), _
         TableName:=PIVOT_NAME)
 
-    arrFields = Array( _
+    fields = Array( _
         "RegNo", _
         "Merke", _
         "Modell", _
         "Chassisnummer", _
         "Drivstoffgruppe", _
         "ForstegangsRegistrering", _
+        FirstRegistrationSourceHeader(), _
         "Leaset", _
         "TransaksjonsNummer", _
         "Eierskiftedato", _
+        "EierskifteKilde", _
         "SelgerType", _
-        OFV_BuyerTypeHeader(), _
+        BuyerTypeHeader(), _
         "Status")
 
     pt.ManualUpdate = True
 
-    For i = LBound(arrFields) To UBound(arrFields)
+    For i = LBound(fields) To UBound(fields)
 
-        Set pf = pt.PivotFields(CStr(arrFields(i)))
+        Set pf = pt.PivotFields(CStr(fields(i)))
 
         pf.Orientation = xlRowField
-        pf.Position = i + 1
+        pf.position = i + 1
 
         On Error Resume Next
+
         pf.Subtotals = Array( _
             False, False, False, False, _
             False, False, False, False, _
             False, False, False, False)
+
         On Error GoTo 0
 
     Next i
@@ -802,557 +1699,168 @@ Private Sub OFV_RebuildOverviewPivot( _
     pt.ManualUpdate = False
     pt.RefreshTable
 
+    ws.Range("A2").value = _
+        "Forstegangsregistrering fra Statens vegvesen. " & _
+        "Eierskifter fra OFV."
+
 End Sub
 
 
 '==============================================================
-' IDENTIFIKATOR
+' TEKST OG IDENTIFIKATORER
 '==============================================================
 
-Private Function OFV_BuildKey( _
-    ByVal strVin As String, _
-    ByVal strReg As String) As String
+Private Function BuyerTypeHeader() As String
+    BuyerTypeHeader = "Kj" & ChrW(248) & "perType"
+End Function
 
-    If Len(strVin) > 0 Then
-        OFV_BuildKey = "VIN|" & UCase$(strVin)
-    ElseIf Len(strReg) > 0 Then
-        OFV_BuildKey = "REG|" & UCase$(strReg)
+
+Private Function BuyerCountyHeader() As String
+
+    BuyerCountyHeader = _
+        "Kj" & ChrW(248) & "perEierFylke"
+
+End Function
+
+
+Private Function FirstRegistrationSourceHeader() As String
+
+    FirstRegistrationSourceHeader = _
+        "F" & ChrW(248) & _
+        "rstegangsregistreringKilde"
+
+End Function
+
+
+Private Function NormalizeIdentifier( _
+    ByVal value As Variant) As String
+
+    NormalizeIdentifier = _
+        UCase$(Trim$(Replace( _
+            CStr(value & vbNullString), _
+            " ", vbNullString)))
+
+End Function
+
+
+Private Function BuildVehicleKey( _
+    ByVal vin As String, _
+    ByVal regNo As String) As String
+
+    If Len(vin) > 0 Then
+        BuildVehicleKey = "VIN|" & vin
+    ElseIf Len(regNo) > 0 Then
+        BuildVehicleKey = "REG|" & regNo
     Else
-        OFV_BuildKey = vbNullString
+        BuildVehicleKey = vbNullString
     End If
 
 End Function
 
 
-'==============================================================
-' FELTMAPPING - 22 KOLONNER A:V
-'==============================================================
-
-Private Function OFV_GetFieldMap() As Variant
-
-    Dim fields(0 To 21) As Variant
-
-    fields(0) = Array("Input", "Input", False)
-    fields(1) = Array("Kilde", "Kilde", False)
-    fields(2) = Array("RegNo", "RegNo", False)
-    fields(3) = Array("ChassisNumber", "Chassisnummer", False)
-    fields(4) = Array("MakeName", "Merke", False)
-    fields(5) = Array("ModelName", "Modell", False)
-    fields(6) = Array("RegistrationType", "RegistreringsType", False)
-    fields(7) = Array("FuelGroup", "Drivstoffgruppe", False)
-    fields(8) = Array("IsLeased", "Leaset", False)
-    fields(9) = Array("IsUsedImported", "Bruktimportert", False)
-
-    fields(10) = Array( _
-        "FirstRegistrationDate", _
-        "ForstegangsRegistrering", True)
-
-    fields(11) = Array( _
-        "TransactionNumber", _
-        "TransaksjonsNummer", False)
-
-    fields(12) = Array( _
-        "TransactionDate", _
-        "Eierskiftedato", True)
-
-    fields(13) = Array( _
-        "CalculatedSellerType", _
-        "SelgerType", False)
-
-    fields(14) = Array( _
-        "CalculatedBuyerType", _
-        OFV_BuyerTypeHeader(), False)
-
-    fields(15) = Array( _
-        "FromOwnerType", _
-        "SelgerEierType", False)
-
-    fields(16) = Array( _
-        "FromOwnerCompanyName", _
-        "SelgerEierFirma", False)
-
-    fields(17) = Array( _
-        "FromOwnerCounty", _
-        "SelgerEierFylke", False)
-
-    fields(18) = Array( _
-        "ToOwnerType", _
-        "KjoperEierType", False)
-
-    fields(19) = Array( _
-        "ToOwnerCompanyName", _
-        "KjoperEierFirma", False)
-
-    fields(20) = Array( _
-        "ToOwnerCounty", _
-        OFV_BuyerCountyHeader(), False)
-
-    fields(21) = Array("Status", "Status", False)
-
-    OFV_GetFieldMap = fields
-
-End Function
-
-
-'==============================================================
-' HENT TRANSAKSJONER
-'==============================================================
-
-Private Function OFV_FetchAllTransactionRows( _
-    ByVal strApiKey As String, _
-    ByVal strIdentifier As String, _
-    ByVal blnIsVin As Boolean, _
-    ByVal strDateFromIso As String, _
-    ByVal strDateToIso As String) As Collection
-
-    Dim colRows As New Collection
-    Dim colItems As Collection
-
-    Dim strFilterKey As String
-    Dim strCursor As String
-    Dim strBody As String
-    Dim strStatus As String
-    Dim strResponse As String
-    Dim strTransactionsArray As String
-    Dim strPaginationObj As String
-
-    Dim varItem As Variant
-    Dim varHasNext As Variant
-    Dim varCursor As Variant
-    Dim blnHasNext As Boolean
-
-    strFilterKey = IIf( _
-        blnIsVin, "chassisNumber", "regNo")
-
-    strCursor = vbNullString
-
-    Do
-
-        strBody = _
-            "{""filters"":{""" & strFilterKey & """:""" & _
-            OFV_JsonEscape(strIdentifier) & """," & _
-            """transactionDateFrom"":""" & strDateFromIso & """," & _
-            """transactionDateTo"":""" & strDateToIso & """}," & _
-            """pagination"":{""first"":1000"
-
-        If Len(strCursor) > 0 Then
-
-            strBody = strBody & _
-                ",""cursor"":""" & _
-                OFV_JsonEscape(strCursor) & """"
-
-        End If
-
-        strBody = strBody & "}," & _
-            """sorting"":{""orderBy"":""transactionDate""," & _
-            """orderDirection"":""" & _
-            OFV_SORT_DIRECTION & """}}"
-
-        strResponse = OFV_PostWithRetries( _
-            strApiKey, strBody, strStatus)
-
-        If strStatus <> "OK" Then
-
-            colRows.Add OFV_BuildEmptyFields( _
-                strIdentifier, blnIsVin, strStatus)
-
-            Set OFV_FetchAllTransactionRows = colRows
-            Exit Function
-
-        End If
-
-        strTransactionsArray = _
-            JSON_ExtractObject(strResponse, "transactions")
-
-        Set colItems = _
-            JSON_ArrayAllElements(strTransactionsArray)
-
-        For Each varItem In colItems
-
-            colRows.Add OFV_BuildFieldsFromTransaction( _
-                strIdentifier, CStr(varItem), blnIsVin)
-
-        Next varItem
-
-        strPaginationObj = _
-            JSON_ExtractObject(strResponse, "pagination")
-
-        varHasNext = JSON_ExtractValue( _
-            strPaginationObj, "hasNextPage")
-
-        varCursor = JSON_ExtractValue( _
-            strPaginationObj, "endCursor")
-
-        blnHasNext = False
-
-        Select Case VarType(varHasNext)
-
-            Case vbBoolean
-                blnHasNext = CBool(varHasNext)
-
-            Case vbString
-                blnHasNext = _
-                    (LCase$(CStr(varHasNext)) = "true")
-
-            Case vbByte, vbInteger, vbLong, _
-                 vbSingle, vbDouble, vbCurrency
-
-                blnHasNext = (varHasNext <> 0)
-
-        End Select
-
-        If blnHasNext Then
-
-            If IsNull(varCursor) Or IsEmpty(varCursor) Then
-                Exit Do
-            End If
-
-            strCursor = CStr(varCursor)
-
-            If Len(strCursor) = 0 Then Exit Do
-
-            Sleep OFV_PAUSE_MS
-
-        Else
-            Exit Do
-        End If
-
-    Loop
-
-    If colRows.Count = 0 Then
-
-        colRows.Add OFV_BuildEmptyFields( _
-            strIdentifier, _
-            blnIsVin, _
-            "Ingen registreringer i perioden")
-
-    End If
-
-    Set OFV_FetchAllTransactionRows = colRows
-
-End Function
-
-
-Private Function OFV_BuildEmptyFields( _
-    ByVal strIdentifier As String, _
-    ByVal blnIsVin As Boolean, _
-    ByVal strStatus As String) As Object
-
-    Dim objFields As Object
-
-    Set objFields = CreateObject("Scripting.Dictionary")
-    objFields.CompareMode = vbTextCompare
-
-    objFields("Input") = strIdentifier
-    objFields("Kilde") = IIf(blnIsVin, "VIN", "Regnr")
-    objFields("Status") = strStatus
-
-    'Vis identifikatoren ogsa nar API-et ikke gir treff
-    If blnIsVin Then
-        objFields("ChassisNumber") = strIdentifier
+Private Function VariantToString( _
+    ByVal value As Variant) As String
+
+    If IsNull(value) Or IsEmpty(value) Then
+        VariantToString = vbNullString
     Else
-        objFields("RegNo") = strIdentifier
-    End If
-
-    Set OFV_BuildEmptyFields = objFields
-
-End Function
-
-
-Private Function OFV_BuildFieldsFromTransaction( _
-    ByVal strIdentifier As String, _
-    ByVal strTxnJson As String, _
-    ByVal blnIsVin As Boolean) As Object
-
-    Dim objFields As Object
-    Dim strFromObj As String
-    Dim strToObj As String
-    Dim strFromOwner As String
-    Dim strToOwner As String
-    Dim strCompanyObj As String
-
-    Set objFields = CreateObject("Scripting.Dictionary")
-    objFields.CompareMode = vbTextCompare
-
-    objFields("Input") = strIdentifier
-    objFields("Kilde") = IIf(blnIsVin, "VIN", "Regnr")
-
-    objFields("RegNo") = _
-        JSON_ExtractValue(strTxnJson, "regNo")
-
-    objFields("ChassisNumber") = _
-        JSON_ExtractValue(strTxnJson, "chassisNumber")
-
-    objFields("MakeName") = _
-        JSON_ExtractValue(strTxnJson, "makeName")
-
-    objFields("ModelName") = _
-        JSON_ExtractValue(strTxnJson, "modelName")
-
-    objFields("RegistrationType") = _
-        JSON_ExtractValue(strTxnJson, "registrationType")
-
-    objFields("FuelGroup") = _
-        JSON_ExtractValue(strTxnJson, "fuelGroup")
-
-    objFields("IsLeased") = _
-        JSON_ExtractValue(strTxnJson, "isLeased")
-
-    objFields("IsUsedImported") = _
-        JSON_ExtractValue(strTxnJson, "isUsedImported")
-
-    objFields("FirstRegistrationDate") = _
-        OFV_DateFromISO(OFV_VariantToString( _
-            JSON_ExtractValue( _
-                strTxnJson, "firstRegistrationDate")))
-
-    objFields("TransactionNumber") = _
-        JSON_ExtractValue(strTxnJson, "transactionNumber")
-
-    objFields("TransactionDate") = _
-        OFV_DateFromISO(OFV_VariantToString( _
-            JSON_ExtractValue( _
-                strTxnJson, "transactionDate")))
-
-    strFromObj = JSON_ExtractObject(strTxnJson, "from")
-    strToObj = JSON_ExtractObject(strTxnJson, "to")
-
-    strFromOwner = JSON_ExtractObject(strFromObj, "owner")
-    strToOwner = JSON_ExtractObject(strToObj, "owner")
-
-    objFields("FromOwnerType") = _
-        JSON_ExtractValue(strFromOwner, "type")
-
-    strCompanyObj = _
-        JSON_ExtractObject(strFromOwner, "companyInfo")
-
-    objFields("FromOwnerCompanyName") = _
-        JSON_ExtractValue(strCompanyObj, "name")
-
-    objFields("FromOwnerCounty") = _
-        JSON_ExtractValue(strFromOwner, "countyName")
-
-    objFields("ToOwnerType") = _
-        JSON_ExtractValue(strToOwner, "type")
-
-    strCompanyObj = _
-        JSON_ExtractObject(strToOwner, "companyInfo")
-
-    objFields("ToOwnerCompanyName") = _
-        JSON_ExtractValue(strCompanyObj, "name")
-
-    objFields("ToOwnerCounty") = _
-        JSON_ExtractValue(strToOwner, "countyName")
-
-    objFields("Status") = "OK"
-
-    Set OFV_BuildFieldsFromTransaction = objFields
-
-End Function
-
-
-Private Function OFV_VariantToString( _
-    ByVal varValue As Variant) As String
-
-    If IsNull(varValue) Or IsEmpty(varValue) Then
-        OFV_VariantToString = vbNullString
-    Else
-        OFV_VariantToString = CStr(varValue)
+        VariantToString = CStr(value)
     End If
 
 End Function
 
 
-'==============================================================
-' HTTP
-'==============================================================
+Private Function JsonEscape( _
+    ByVal value As String) As String
 
-Private Function OFV_PostWithRetries( _
-    ByVal strApiKey As String, _
-    ByVal strBody As String, _
-    ByRef strStatus As String) As String
+    Dim result As String
 
-    Dim lngAttempt As Long
-    Dim lngStatusCode As Long
-    Dim strLastError As String
-    Dim strResponseText As String
-    Dim objHTTP As Object
+    result = Replace(value, "\", "\\")
+    result = Replace( _
+        result, Chr$(34), "\" & Chr$(34))
 
-    strStatus = "OK"
-
-    For lngAttempt = 1 To OFV_MAX_RETRIES
-
-        Set objHTTP = _
-            CreateObject("MSXML2.ServerXMLHTTP.6.0")
-
-        lngStatusCode = 0
-        strResponseText = vbNullString
-
-        On Error Resume Next
-
-        objHTTP.Open "POST", OFV_BASE_URL, False
-
-        objHTTP.setRequestHeader _
-            "Ocp-Apim-Subscription-Key", strApiKey
-
-        objHTTP.setRequestHeader _
-            "Content-Type", "application/json"
-
-        objHTTP.setTimeouts 10000, 10000, 30000, 30000
-        objHTTP.Send strBody
-
-        lngStatusCode = objHTTP.Status
-        strResponseText = objHTTP.ResponseText
-
-        If Err.Number <> 0 Then
-
-            strLastError = "VBA-feil: " & Err.Description
-            lngStatusCode = 0
-            Err.Clear
-
-        End If
-
-        On Error GoTo 0
-
-        Select Case lngStatusCode
-
-            Case 200
-                OFV_PostWithRetries = strResponseText
-                Exit Function
-
-            Case 401
-                strStatus = _
-                    "Feil: 401 Unauthorized - kontroller API-nokkelen"
-                Exit Function
-
-            Case 403
-                strStatus = _
-                    "Feil: 403 Forbidden - tilgang eller kvote"
-                Exit Function
-
-            Case 429, 500, 502, 503, 504
-
-                strLastError = _
-                    lngStatusCode & ": " & strResponseText
-
-                Sleep OFV_RETRY_WAIT_MS * lngAttempt
-
-            Case Else
-
-                If lngStatusCode <> 0 Then
-
-                    strStatus = _
-                        "Feil: " & lngStatusCode & _
-                        " " & strResponseText
-
-                    Exit Function
-
-                Else
-
-                    Sleep OFV_RETRY_WAIT_MS * lngAttempt
-
-                End If
-
-        End Select
-
-    Next lngAttempt
-
-    strStatus = _
-        "Feil: Ga opp etter " & OFV_MAX_RETRIES & _
-        " forsok. Siste feil: " & strLastError
+    JsonEscape = result
 
 End Function
 
 
-'==============================================================
-' JSON-HJELPEFUNKSJONER
-'==============================================================
+Private Function DateFromISO( _
+    ByVal isoDate As String) As Variant
 
-Private Function OFV_JsonEscape( _
-    ByVal strValue As String) As String
-
-    Dim strResult As String
-
-    strResult = Replace(strValue, "\", "\\")
-    strResult = Replace( _
-        strResult, Chr(34), "\" & Chr(34))
-
-    OFV_JsonEscape = strResult
-
-End Function
-
-
-Private Function OFV_DateFromISO( _
-    ByVal strISO As String) As Variant
-
-    If Len(strISO) < 10 Then
-        OFV_DateFromISO = Empty
+    If Len(isoDate) < 10 Then
+        DateFromISO = Empty
         Exit Function
     End If
 
     On Error GoTo InvalidDate
 
-    OFV_DateFromISO = DateSerial( _
-        CInt(Mid$(strISO, 1, 4)), _
-        CInt(Mid$(strISO, 6, 2)), _
-        CInt(Mid$(strISO, 9, 2)))
+    DateFromISO = DateSerial( _
+        CInt(Mid$(isoDate, 1, 4)), _
+        CInt(Mid$(isoDate, 6, 2)), _
+        CInt(Mid$(isoDate, 9, 2)))
 
     Exit Function
 
 InvalidDate:
-    OFV_DateFromISO = Empty
+    DateFromISO = Empty
 
 End Function
 
 
+'==============================================================
+' JSON
+'==============================================================
+
 Private Function JSON_FindMatchingBrace( _
-    ByVal strJSON As String, _
-    ByVal lngOpenPos As Long) As Long
+    ByVal json As String, _
+    ByVal openPosition As Long) As Long
 
-    Dim strOpen As String
-    Dim strClose As String
-    Dim strChar As String
-    Dim lngDepth As Long
+    Dim openCharacter As String
+    Dim closeCharacter As String
+    Dim currentCharacter As String
+    Dim depth As Long
     Dim i As Long
-    Dim blnInString As Boolean
+    Dim insideString As Boolean
 
-    strOpen = Mid$(strJSON, lngOpenPos, 1)
+    openCharacter = Mid$(json, openPosition, 1)
 
-    If strOpen = "{" Then
-        strClose = "}"
-    ElseIf strOpen = "[" Then
-        strClose = "]"
+    If openCharacter = "{" Then
+        closeCharacter = "}"
+    ElseIf openCharacter = "[" Then
+        closeCharacter = "]"
     Else
         Exit Function
     End If
 
-    For i = lngOpenPos To Len(strJSON)
+    For i = openPosition To Len(json)
 
-        strChar = Mid$(strJSON, i, 1)
+        currentCharacter = Mid$(json, i, 1)
 
-        If blnInString Then
+        If insideString Then
 
-            If strChar = "\" Then
+            If currentCharacter = "\" Then
                 i = i + 1
-            ElseIf strChar = Chr(34) Then
-                blnInString = False
+            ElseIf currentCharacter = Chr$(34) Then
+                insideString = False
             End If
 
         Else
 
-            If strChar = Chr(34) Then
-                blnInString = True
+            If currentCharacter = Chr$(34) Then
+                insideString = True
 
-            ElseIf strChar = strOpen Then
-                lngDepth = lngDepth + 1
+            ElseIf currentCharacter = openCharacter Then
+                depth = depth + 1
 
-            ElseIf strChar = strClose Then
-                lngDepth = lngDepth - 1
+            ElseIf currentCharacter = closeCharacter Then
 
-                If lngDepth = 0 Then
+                depth = depth - 1
+
+                If depth = 0 Then
                     JSON_FindMatchingBrace = i
                     Exit Function
                 End If
+
             End If
 
         End If
@@ -1363,22 +1871,22 @@ End Function
 
 
 Private Function JSON_SkipWhitespace( _
-    ByVal strJSON As String, _
-    ByVal lngPos As Long) As Long
+    ByVal json As String, _
+    ByVal position As Long) As Long
 
     Dim p As Long
-    Dim strChar As String
+    Dim character As String
 
-    p = lngPos
+    p = position
 
-    Do While p <= Len(strJSON)
+    Do While p <= Len(json)
 
-        strChar = Mid$(strJSON, p, 1)
+        character = Mid$(json, p, 1)
 
-        If strChar = " " Or _
-           strChar = vbLf Or _
-           strChar = vbCr Or _
-           strChar = vbTab Then
+        If character = " " Or _
+           character = vbLf Or _
+           character = vbCr Or _
+           character = vbTab Then
 
             p = p + 1
 
@@ -1394,147 +1902,171 @@ End Function
 
 
 Private Function JSON_ExtractObject( _
-    ByVal strJSON As String, _
-    ByVal strKey As String) As String
+    ByVal json As String, _
+    ByVal key As String) As String
 
-    Dim lngKeyPos As Long
-    Dim lngPos As Long
-    Dim lngEnd As Long
-    Dim strFirstChar As String
+    Dim keyPosition As Long
+    Dim valuePosition As Long
+    Dim endPosition As Long
+    Dim firstCharacter As String
 
-    If Len(strJSON) = 0 Then Exit Function
+    If Len(json) = 0 Then Exit Function
 
-    lngKeyPos = InStr( _
-        1, strJSON, _
-        Chr(34) & strKey & Chr(34) & ":", _
+    keyPosition = InStr( _
+        1, json, _
+        Chr$(34) & key & Chr$(34) & ":", _
         vbBinaryCompare)
 
-    If lngKeyPos = 0 Then Exit Function
+    If keyPosition = 0 Then Exit Function
 
-    lngPos = lngKeyPos + Len(strKey) + 3
-    lngPos = JSON_SkipWhitespace(strJSON, lngPos)
+    valuePosition = keyPosition + Len(key) + 3
+    valuePosition = JSON_SkipWhitespace( _
+        json, valuePosition)
 
-    strFirstChar = Mid$(strJSON, lngPos, 1)
+    firstCharacter = Mid$( _
+        json, valuePosition, 1)
 
-    If strFirstChar <> "{" And _
-       strFirstChar <> "[" Then Exit Function
+    If firstCharacter <> "{" And _
+       firstCharacter <> "[" Then Exit Function
 
-    lngEnd = JSON_FindMatchingBrace(strJSON, lngPos)
+    endPosition = JSON_FindMatchingBrace( _
+        json, valuePosition)
 
-    If lngEnd = 0 Then Exit Function
+    If endPosition = 0 Then Exit Function
 
     JSON_ExtractObject = Mid$( _
-        strJSON, lngPos, lngEnd - lngPos + 1)
+        json, valuePosition, _
+        endPosition - valuePosition + 1)
 
 End Function
 
 
 Private Function JSON_ExtractValue( _
-    ByVal strJSON As String, _
-    ByVal strKey As String) As Variant
+    ByVal json As String, _
+    ByVal key As String) As Variant
 
-    Dim lngKeyPos As Long
-    Dim lngPos As Long
-    Dim lngEnd As Long
+    Dim keyPosition As Long
+    Dim valuePosition As Long
+    Dim endPosition As Long
     Dim i As Long
     Dim j As Long
 
-    Dim strFirstChar As String
-    Dim strResult As String
-    Dim strRaw As String
-    Dim c As String
-    Dim nc As String
-    Dim ch As String
+    Dim firstCharacter As String
+    Dim result As String
+    Dim rawValue As String
+    Dim character As String
+    Dim nextCharacter As String
 
     JSON_ExtractValue = Null
 
-    If Len(strJSON) = 0 Then Exit Function
+    If Len(json) = 0 Then Exit Function
 
-    lngKeyPos = InStr( _
-        1, strJSON, _
-        Chr(34) & strKey & Chr(34) & ":", _
+    keyPosition = InStr( _
+        1, json, _
+        Chr$(34) & key & Chr$(34) & ":", _
         vbBinaryCompare)
 
-    If lngKeyPos = 0 Then Exit Function
+    If keyPosition = 0 Then Exit Function
 
-    lngPos = lngKeyPos + Len(strKey) + 3
-    lngPos = JSON_SkipWhitespace(strJSON, lngPos)
+    valuePosition = keyPosition + Len(key) + 3
+    valuePosition = JSON_SkipWhitespace( _
+        json, valuePosition)
 
-    strFirstChar = Mid$(strJSON, lngPos, 1)
+    firstCharacter = Mid$(json, valuePosition, 1)
 
-    If strFirstChar = Chr(34) Then
+    If firstCharacter = Chr$(34) Then
 
-        i = lngPos + 1
+        i = valuePosition + 1
 
-        Do While i <= Len(strJSON)
+        Do While i <= Len(json)
 
-            c = Mid$(strJSON, i, 1)
+            character = Mid$(json, i, 1)
 
-            If c = "\" Then
+            If character = "\" Then
 
-                nc = Mid$(strJSON, i + 1, 1)
+                nextCharacter = Mid$(json, i + 1, 1)
 
-                Select Case nc
-                    Case "n": strResult = strResult & vbLf
-                    Case "r": strResult = strResult & vbCr
-                    Case "t": strResult = strResult & vbTab
-                    Case Chr(34): strResult = strResult & Chr(34)
-                    Case "\": strResult = strResult & "\"
-                    Case Else: strResult = strResult & nc
+                Select Case nextCharacter
+                    Case "n"
+                        result = result & vbLf
+                    Case "r"
+                        result = result & vbCr
+                    Case "t"
+                        result = result & vbTab
+                    Case Chr$(34)
+                        result = result & Chr$(34)
+                    Case "\"
+                        result = result & "\"
+                    Case Else
+                        result = result & nextCharacter
                 End Select
 
                 i = i + 2
 
-            ElseIf c = Chr(34) Then
+            ElseIf character = Chr$(34) Then
                 Exit Do
 
             Else
-                strResult = strResult & c
+                result = result & character
                 i = i + 1
             End If
 
         Loop
 
-        JSON_ExtractValue = strResult
+        JSON_ExtractValue = result
 
-    ElseIf strFirstChar = "{" Or _
-           strFirstChar = "[" Then
+    ElseIf firstCharacter = "{" Or _
+           firstCharacter = "[" Then
 
-        lngEnd = JSON_FindMatchingBrace(strJSON, lngPos)
+        endPosition = JSON_FindMatchingBrace( _
+            json, valuePosition)
 
-        If lngEnd > 0 Then
+        If endPosition > 0 Then
+
             JSON_ExtractValue = Mid$( _
-                strJSON, lngPos, lngEnd - lngPos + 1)
+                json, valuePosition, _
+                endPosition - valuePosition + 1)
+
         End If
 
     Else
 
-        j = lngPos
+        j = valuePosition
 
-        Do While j <= Len(strJSON)
+        Do While j <= Len(json)
 
-            ch = Mid$(strJSON, j, 1)
+            character = Mid$(json, j, 1)
 
-            If ch = "," Or ch = "}" Or ch = "]" Then Exit Do
+            If character = "," Or _
+               character = "}" Or _
+               character = "]" Then Exit Do
 
-            strRaw = strRaw & ch
+            rawValue = rawValue & character
             j = j + 1
 
         Loop
 
-        strRaw = Trim$(strRaw)
+        rawValue = Trim$(rawValue)
 
-        Select Case LCase$(strRaw)
-            Case "true": JSON_ExtractValue = True
-            Case "false": JSON_ExtractValue = False
-            Case "null": JSON_ExtractValue = Null
+        Select Case LCase$(rawValue)
+
+            Case "true"
+                JSON_ExtractValue = True
+
+            Case "false"
+                JSON_ExtractValue = False
+
+            Case "null"
+                JSON_ExtractValue = Null
 
             Case Else
-                If IsNumeric(strRaw) Then
-                    JSON_ExtractValue = CDbl(strRaw)
+
+                If IsNumeric(rawValue) Then
+                    JSON_ExtractValue = CDbl(rawValue)
                 Else
-                    JSON_ExtractValue = strRaw
+                    JSON_ExtractValue = rawValue
                 End If
+
         End Select
 
     End If
@@ -1543,87 +2075,91 @@ End Function
 
 
 Private Function JSON_ArrayAllElements( _
-    ByVal strJSONArray As String) As Collection
+    ByVal jsonArray As String) As Collection
 
-    Dim colResult As New Collection
-    Dim lngPos As Long
-    Dim lngEnd As Long
+    Dim result As New Collection
+    Dim position As Long
+    Dim endPosition As Long
     Dim i As Long
 
-    Dim strFirstChar As String
-    Dim strElement As String
-    Dim strResult As String
-    Dim c As String
+    Dim firstCharacter As String
+    Dim element As String
+    Dim rawValue As String
+    Dim character As String
 
-    If Len(strJSONArray) < 2 Then
-        Set JSON_ArrayAllElements = colResult
+    If Len(jsonArray) < 2 Then
+        Set JSON_ArrayAllElements = result
         Exit Function
     End If
 
-    If Left$(strJSONArray, 1) <> "[" Then
-        Set JSON_ArrayAllElements = colResult
+    If Left$(jsonArray, 1) <> "[" Then
+        Set JSON_ArrayAllElements = result
         Exit Function
     End If
 
-    lngPos = JSON_SkipWhitespace(strJSONArray, 2)
+    position = JSON_SkipWhitespace(jsonArray, 2)
 
-    Do While lngPos <= Len(strJSONArray)
+    Do While position <= Len(jsonArray)
 
-        If Mid$(strJSONArray, lngPos, 1) = "]" Then Exit Do
+        If Mid$(jsonArray, position, 1) = "]" Then
+            Exit Do
+        End If
 
-        strFirstChar = Mid$(strJSONArray, lngPos, 1)
-        strElement = vbNullString
+        firstCharacter = Mid$(jsonArray, position, 1)
+        element = vbNullString
 
-        If strFirstChar = "{" Or strFirstChar = "[" Then
+        If firstCharacter = "{" Or _
+           firstCharacter = "[" Then
 
-            lngEnd = JSON_FindMatchingBrace( _
-                strJSONArray, lngPos)
+            endPosition = JSON_FindMatchingBrace( _
+                jsonArray, position)
 
-            If lngEnd = 0 Then Exit Do
+            If endPosition = 0 Then Exit Do
 
-            strElement = Mid$( _
-                strJSONArray, _
-                lngPos, _
-                lngEnd - lngPos + 1)
+            element = Mid$( _
+                jsonArray, position, _
+                endPosition - position + 1)
 
-            lngPos = lngEnd + 1
+            position = endPosition + 1
 
         Else
 
-            i = lngPos
-            strResult = vbNullString
+            i = position
+            rawValue = vbNullString
 
-            Do While i <= Len(strJSONArray)
+            Do While i <= Len(jsonArray)
 
-                c = Mid$(strJSONArray, i, 1)
+                character = Mid$(jsonArray, i, 1)
 
-                If c = "," Or c = "]" Then Exit Do
+                If character = "," Or _
+                   character = "]" Then Exit Do
 
-                strResult = strResult & c
+                rawValue = rawValue & character
                 i = i + 1
 
             Loop
 
-            strElement = Trim$(strResult)
-            lngPos = i
+            element = Trim$(rawValue)
+            position = i
 
         End If
 
-        colResult.Add strElement
+        result.Add element
 
-        lngPos = JSON_SkipWhitespace(strJSONArray, lngPos)
+        position = JSON_SkipWhitespace( _
+            jsonArray, position)
 
-        If lngPos <= Len(strJSONArray) Then
+        If position <= Len(jsonArray) Then
 
-            If Mid$(strJSONArray, lngPos, 1) = "," Then
-                lngPos = JSON_SkipWhitespace( _
-                    strJSONArray, lngPos + 1)
+            If Mid$(jsonArray, position, 1) = "," Then
+                position = JSON_SkipWhitespace( _
+                    jsonArray, position + 1)
             End If
 
         End If
 
     Loop
 
-    Set JSON_ArrayAllElements = colResult
+    Set JSON_ArrayAllElements = result
 
 End Function
