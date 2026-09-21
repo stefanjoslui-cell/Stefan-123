@@ -120,10 +120,10 @@ Public Sub OFV_RefreshInfo()
     stage = "finner arkene"
     API_ShowStatus "Forbereder", stage
 
-    Set wsInput = ThisWorkbook.Worksheets(INPUT_SHEET)
-    Set wsResult = ThisWorkbook.Worksheets(RESULT_SHEET)
-    Set wsOverview = ThisWorkbook.Worksheets(OVERVIEW_SHEET)
-    Set wsControl = ThisWorkbook.Worksheets(CONTROL_SHEET)
+    Set wsInput = GetRequiredSheet(ThisWorkbook, INPUT_SHEET)
+    Set wsResult = GetRequiredSheet(ThisWorkbook, RESULT_SHEET)
+    Set wsOverview = GetRequiredSheet(ThisWorkbook, OVERVIEW_SHEET)
+    Set wsControl = GetRequiredSheet(ThisWorkbook, CONTROL_SHEET)
 
     If wsResult.ProtectContents Then
         Err.Raise vbObjectError + 1000, , _
@@ -1409,6 +1409,34 @@ End Sub
 '==============================================================
 ' TEKST OG IDENTIFIKATORER
 '==============================================================
+
+' Henter en arkfane ved navn og gir en presis feilmelding
+' (istedenfor "Subscript out of range") hvis fanen ikke finnes -
+' f.eks. ved skrivefeil, ekstra mellomrom eller feil store/sma bokstaver.
+Private Function GetRequiredSheet( _
+    ByVal wb As Workbook, _
+    ByVal sheetName As String) As Worksheet
+
+    Dim ws As Worksheet
+
+    On Error Resume Next
+    Set ws = wb.Worksheets(sheetName)
+    On Error GoTo 0
+
+    If ws Is Nothing Then
+
+        Err.Raise vbObjectError + 1010, "GetRequiredSheet", _
+            "Fant ikke arkfanen """ & sheetName & """. " & _
+            "Sjekk at en arkfane med akkurat dette navnet " & _
+            "finnes i arbeidsboken (store/sma bokstaver og " & _
+            "mellomrom ma stemme noyaktig)."
+
+    End If
+
+    Set GetRequiredSheet = ws
+
+End Function
+
 
 Private Function BuyerTypeHeader() As String
     BuyerTypeHeader = "Kj" & ChrW(248) & "perType"
