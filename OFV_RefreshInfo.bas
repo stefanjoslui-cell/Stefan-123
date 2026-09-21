@@ -1904,7 +1904,7 @@ Private Function BuildKontrollRow( _
     result("Selger") = vbNullString
     result("Kjoper") = vbNullString
     result("StatusEierskifte") = vbNullString
-    result("MatchetTransaksjon") = Nothing
+    Set result("MatchetTransaksjon") = Nothing
 
     If IsEmpty(bokfortDate) Then
 
