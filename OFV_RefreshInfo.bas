@@ -1261,10 +1261,9 @@ End Sub
 
 
 ' Gjor det tydelig hvor en bils transaksjoner slutter og neste
-' begynner (topplinje ved skifte av "Input"-verdi), og uthever raden
-' som Kontroll solgte biler faktisk brukte til kontrollen (merket
-' ErKontrollMatch=True pa det samme delte objektet som ligger i
-' allRows - se BuildKontrollRow).
+' begynner: topplinje ved skifte av "Input"-verdi, og kun den
+' FORSTE raden for hver bil er fet/uthevet - resten av bilens
+' transaksjoner star i vanlig skrift.
 Private Sub FormatResultTableGrouping( _
     ByVal ws As Worksheet, _
     ByVal lo As ListObject, _
@@ -1303,19 +1302,25 @@ Private Sub FormatResultTableGrouping( _
 
         End If
 
-        If resultRow.Exists("ErKontrollMatch") Then
+        If r = 1 Or denneInput <> forrigeInput Then
 
-            If resultRow("ErKontrollMatch") = True Then
+            With ws.Range( _
+                ws.Cells(wsRow, 1), ws.Cells(wsRow, lo.ListColumns.Count))
 
-                With ws.Range( _
-                    ws.Cells(wsRow, 1), ws.Cells(wsRow, lo.ListColumns.Count))
+                .Font.Bold = True
+                .Interior.Color = RGB(238, 244, 251)
 
-                    .Font.Bold = True
-                    .Interior.Color = RGB(238, 244, 251)
+            End With
 
-                End With
+        Else
 
-            End If
+            With ws.Range( _
+                ws.Cells(wsRow, 1), ws.Cells(wsRow, lo.ListColumns.Count))
+
+                .Font.Bold = False
+                .Interior.ColorIndex = xlColorIndexNone
+
+            End With
 
         End If
 
