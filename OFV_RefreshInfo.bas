@@ -135,6 +135,11 @@ Public Sub OFV_RefreshInfo()
             "Kontroll solgte biler er beskyttet."
     End If
 
+    stage = "oppretter/kontrollerer KjoretoyInput-tabellen"
+    API_ShowStatus "Forbereder", stage
+
+    EnsureInputTable wsInput
+
     stage = "leser API-nokkel"
     API_ShowStatus "Forbereder", stage
 
@@ -1331,6 +1336,12 @@ End Sub
 
 Private Sub UpdateOverviewKPIs(ByVal ws As Worksheet)
 
+    ws.Range("A4").value = "Antall kjoretoy"
+    ws.Range("C4").value = "OFV-treff (OK)"
+    ws.Range("F4").value = "Uten treff / feil"
+
+    ws.Range("A4:A4,C4:C4,F4:F4").Font.Bold = True
+
     ws.Range("A5").Formula = _
         "=SUMPRODUCT(--(((KjoretoyInput[Regnr]<>"""")+" & _
         "(KjoretoyInput[VIN]<>""""))>0))"
@@ -1444,6 +1455,51 @@ Private Function GetRequiredSheet( _
     Set GetRequiredSheet = ws
 
 End Function
+
+
+' Oppretter Excel-tabellen KjoretoyInput pa Input-arket hvis den
+' ikke finnes fra for. Resten av koden (og formlene i Oversikt og
+' Kontroll solgte biler) refererer til KjoretoyInput[Regnr] og
+' KjoretoyInput[VIN] som strukturerte referanser - det krever et
+' ekte tabellobjekt, ikke bare rader med tekst. Overskriftsraden
+' forventes rett over FIRST_ROW (dvs. rad 4 nar FIRST_ROW er 5),
+' med Regnr i kolonne B og VIN i kolonne C.
+Private Sub EnsureInputTable(ByVal ws As Worksheet)
+
+    Dim lo As ListObject
+    Dim headerRow As Long
+    Dim lastDataRow As Long
+    Dim target As Range
+
+    On Error Resume Next
+    Set lo = ws.ListObjects(INPUT_TABLE)
+    On Error GoTo 0
+
+    If Not lo Is Nothing Then Exit Sub
+
+    headerRow = FIRST_ROW - 1
+
+    lastDataRow = Application.Max( _
+        ws.Cells(ws.rows.Count, COL_REGNR).End(xlUp).Row, _
+        ws.Cells(ws.rows.Count, COL_VIN).End(xlUp).Row)
+
+    If lastDataRow < FIRST_ROW Then
+        lastDataRow = FIRST_ROW
+    End If
+
+    Set target = ws.Range( _
+        ws.Cells(headerRow, COL_REGNR), _
+        ws.Cells(lastDataRow, COL_VIN))
+
+    Set lo = ws.ListObjects.Add(xlSrcRange, target, , xlYes)
+    lo.Name = INPUT_TABLE
+
+    ' Tving eksakte kolonnenavn uansett hva som sto i overskriftscellene,
+    ' slik at KjoretoyInput[Regnr]/[VIN] alltid treffer.
+    lo.ListColumns(1).Name = "Regnr"
+    lo.ListColumns(2).Name = "VIN"
+
+End Sub
 
 
 ' Leser verdien fra et navngitt omrade hvis det finnes i
