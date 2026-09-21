@@ -1356,8 +1356,6 @@ Private Sub UpdateControlSheet( _
     Dim lastRow As Long
     Dim groupStartRow As Long
 
-    Dim kontrollerteBiler As Long
-    Dim bilerMed0Dager As Long
     Dim bucket0 As Long
     Dim bucket1til15 As Long
     Dim bucketOver15 As Long
@@ -1431,13 +1429,11 @@ Private Sub UpdateControlSheet( _
 
         If kontrollertText = "Ja" Then
 
-            kontrollerteBiler = kontrollerteBiler + 1
             dagerAvvik = row("DagerAvvik")
 
             If IsNumeric(dagerAvvik) Then
 
                 If CLng(dagerAvvik) = 0 Then
-                    bilerMed0Dager = bilerMed0Dager + 1
                     bucket0 = bucket0 + 1
                 ElseIf CLng(dagerAvvik) <= 15 Then
                     bucket1til15 = bucket1til15 + 1
@@ -1456,8 +1452,6 @@ Private Sub UpdateControlSheet( _
     '----------------------------------------------------------
 
     ws.Range("A6:B6").Merge : ws.Range("A6").value = "Inputbiler"
-    ws.Range("C6:D6").Merge : ws.Range("C6").value = "Kontrollerte biler"
-    ws.Range("E6:F6").Merge : ws.Range("E6").value = "Biler med 0 dager"
     ws.Range("G6").value = "Fra dato"
     ws.Range("H6").value = "Til dato"
     ws.Range("I6:M6").Merge
@@ -1472,12 +1466,6 @@ Private Sub UpdateControlSheet( _
 
     ws.Range("A7:B7").Merge
     ws.Range("A7").value = totalVehicles
-
-    ws.Range("C7:D7").Merge
-    ws.Range("C7").value = kontrollerteBiler
-
-    ws.Range("E7:F7").Merge
-    ws.Range("E7").value = bilerMed0Dager
 
     ws.Range("G7").value = dateFrom
     ws.Range("H7").value = dateTo
