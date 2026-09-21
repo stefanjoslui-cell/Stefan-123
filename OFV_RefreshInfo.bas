@@ -698,7 +698,7 @@ Private Function FetchOFVTransactions( _
         body = body & "},"
         body = body & """sorting"":{"
         body = body & """orderBy"":""transactionDate"","
-        body = body & """orderDirection"":""ASC""}}"
+        body = body & """orderDirection"":""DESC""}}"
 
         responseText = PostOFVWithRetries( _
             apiKey, body, statusText)
