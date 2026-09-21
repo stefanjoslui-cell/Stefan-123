@@ -2,21 +2,28 @@ Option Explicit
 
 ' Produksjonsmakro for prosjektet "Python program for bilregistrering":
 ' Input-arket (KjoretoyInput), Resultat-arket (Transaksjoner-tabellen),
-' Oversikt (KPI-er + pivot) og Kontroll solgte biler beholdes uendret.
+' Oversikt (KPI-er + pivot + regnr/forstegangsreg-liste) og
+' Kontroll solgte biler oppdateres alle fra samme OFV-datahenting.
 '
-' Endret i forhold til forrige versjon:
-'   - Statens Vegvesen (SVV/"VVS") er fjernet fullstendig. Ingen kall,
-'     ingen nokkel, ingen status- eller tellevariabler for den kilden.
-'     ForstegangsRegistrering hentes na direkte fra OFV sitt eget felt
-'     "firstRegistrationDate" pa hver transaksjon - den var allerede der,
-'     sa vi mister ingen funksjonalitet ved a droppe SVV-kallet.
-'   - HTTP-kallene mot OFV bruker WinHttp.WinHttpRequest.5.1 (samme som
-'     i testscriptet som lostte lagringsproblemene dine), ikke
-'     MSXML2.ServerXMLHTTP.6.0 som den forrige versjonen brukte.
-'   - OFV_URL peker na pa det bekreftet fungerende endepunktet
-'     (https://data.ofv.no/transactions/v1/query). Det som stod i
-'     forrige versjon (https://api.ofv.no/transactions/v1/, hentet fra
-'     swagger-dokumentets "host") gir 404 i praksis.
+' Kort om oppsettet:
+'   - Bruker kun OFV Transactions API. Statens Vegvesen (SVV/"VVS") er
+'     ikke i bruk noe sted i denne filen.
+'   - HTTP-kallene bruker WinHttp.WinHttpRequest.5.1 (samme klient som
+'     testscriptet som lostte lagringsproblemene tidligere).
+'   - OFV_URL = https://api.ofv.no/transactions/v1/, bekreftet via
+'     "Try it"-konsollen i Azure APIM-portalen (se kommentar ved
+'     konstanten). Kallet henter ALLE transaksjoner for hvert regnr/VIN
+'     - uten datofilter - sa firstRegistrationDate garantert finnes sa
+'     lenge OFV har minst en transaksjon noen gang for kjoretoyet.
+'     Fra dato/Til dato (Input!B2:B3) brukes kun til a avgrense hvilken
+'     transaksjon som regnes som "naermeste eierskifte" i Kontroll
+'     solgte biler - Resultat/Transaksjoner-tabellen viser hele
+'     historikken, og kan filtreres pa TransaksjonsDato med det
+'     innebygde Excel-autofilteret.
+'   - KjoretoyInput-tabellen pa Input (bygges automatisk om den
+'     mangler) har na 4 kolonner: Regnr, VIN, Bokfort (dato du fyller
+'     inn manuelt) og Forstegangsregistrering (skrives tilbake av
+'     makroen etter hver kjoring).
 
 #If VBA7 Then
     Private Declare PtrSafe Sub Sleep Lib "kernel32" _
@@ -43,6 +50,7 @@ Private Const FIRST_ROW As Long = 5
 Private Const COL_REGNR As Long = 2
 Private Const COL_VIN As Long = 3
 Private Const COL_BOKFORT As Long = 4
+Private Const COL_FORSTEREG As Long = 5
 
 ' Bekreftet via "Try it"-konsollen i Azure APIM-portalen
 ' (https://data.ofv.no/api-details#api=transactions-api-v1&operation=query-transactions):
@@ -81,7 +89,9 @@ Public Sub OFV_RefreshInfo()
     Dim queue As Object
     Dim hitVehicles As Object
     Dim vehicleRowsByKey As Object
+    Dim firstRegByKey As Object
     Dim resultRow As Object
+    Dim kontrollRow As Object
 
     Dim allRows As Collection
     Dim vehicleRows As Collection
@@ -96,8 +106,6 @@ Public Sub OFV_RefreshInfo()
     Dim ofvKey As String
     Dim dateFrom As Variant
     Dim dateTo As Variant
-    Dim DateFromISO As String
-    Dim dateToISO As String
     Dim stage As String
 
     Dim lastRegRow As Long
@@ -200,9 +208,6 @@ Public Sub OFV_RefreshInfo()
         GoTo SafeExit
     End If
 
-    DateFromISO = Format$(CDate(dateFrom), "yyyy-mm-dd")
-    dateToISO = Format$(CDate(dateTo), "yyyy-mm-dd")
-
     stage = "leser kjoretoylisten"
     API_ShowStatus "Forbereder", stage
 
@@ -268,6 +273,9 @@ Public Sub OFV_RefreshInfo()
 
     Set kontrollRows = New Collection
 
+    Set firstRegByKey = CreateObject("Scripting.Dictionary")
+    firstRegByKey.CompareMode = vbTextCompare
+
     fieldMap = GetFieldMap()
     fieldCount = UBound(fieldMap) + 1
     totalVehicles = queue.Count
@@ -306,9 +314,7 @@ Public Sub OFV_RefreshInfo()
             identifier, _
             useVin, _
             regNo, _
-            vin, _
-            DateFromISO, _
-            dateToISO)
+            vin)
 
         If Not vehicleRowsByKey.Exists(CStr(key)) Then
             vehicleRowsByKey.Add CStr(key), New Collection
@@ -368,13 +374,24 @@ Public Sub OFV_RefreshInfo()
             Set vehicleTxRows = vehicleRowsByKey(CStr(key))
         End If
 
-        kontrollRows.Add BuildKontrollRow( _
+        Set kontrollRow = BuildKontrollRow( _
             CStr(vehicleData(0)), _
             CStr(vehicleData(1)), _
             vehicleData(2), _
-            vehicleTxRows)
+            vehicleTxRows, _
+            CDate(dateFrom), _
+            CDate(dateTo))
+
+        kontrollRows.Add kontrollRow
+
+        firstRegByKey(CStr(key)) = kontrollRow("Forstegangsregistrert")
 
     Next key
+
+    stage = "skriver forstegangsregistrering til Input"
+    API_ShowStatus "Excel", stage
+
+    WriteFirstRegistrationToInput wsInput, firstRegByKey
 
     '==========================================================
     ' RESULTAT
@@ -481,6 +498,7 @@ Public Sub OFV_RefreshInfo()
 
     UpdateOverviewKPIs wsOverview
     RebuildOverviewPivot wsOverview, loResult
+    WriteFirstRegistrationOverviewList wsOverview, kontrollRows
 
     '==========================================================
     ' KONTROLLARK
@@ -625,14 +643,20 @@ End Sub
 ' OFV-TRANSAKSJONER
 '==============================================================
 
+' Henter ALLE transaksjoner for kjoretoyet - ikke bare de innenfor
+' Fra dato/Til dato. Dette gir ett kall per kjoretoy (ikke to), og
+' garanterer at firstRegistrationDate blir funnet sa lenge OFV har
+' minst en transaksjon noen gang for kjoretoyet, uavhengig av om den
+' ligger innenfor perioden. Periodeavgrensningen for "naermeste
+' eierskifte" gjores i BuildKontrollRow, og for Transaksjoner-tabellen
+' kan brukeren selv filtrere pa TransaksjonsDato med det innebygde
+' Excel-autofilteret.
 Private Function FetchOFVTransactions( _
     ByVal apiKey As String, _
     ByVal identifier As String, _
     ByVal useVin As Boolean, _
     ByVal originalRegNo As String, _
-    ByVal originalVin As String, _
-    ByVal DateFromISO As String, _
-    ByVal dateToISO As String) As Collection
+    ByVal originalVin As String) As Collection
 
     Dim rows As New Collection
     Dim items As Collection
@@ -662,11 +686,7 @@ Private Function FetchOFVTransactions( _
 
         body = "{""filters"":{"
         body = body & """" & filterKey & """:"""
-        body = body & JsonEscape(identifier) & ""","
-        body = body & """transactionDateFrom"":"""
-        body = body & DateFromISO & ""","
-        body = body & """transactionDateTo"":"""
-        body = body & dateToISO & """},"
+        body = body & JsonEscape(identifier) & """},"
         body = body & """pagination"":{""first"":1000"
 
         If Len(cursor) > 0 Then
@@ -1527,7 +1547,9 @@ Private Function BuildKontrollRow( _
     ByVal regNo As String, _
     ByVal vin As String, _
     ByVal bokfortRaw As Variant, _
-    ByVal vehicleTxRows As Collection) As Object
+    ByVal vehicleTxRows As Collection, _
+    ByVal periodeFra As Date, _
+    ByVal periodeTil As Date) As Object
 
     Dim result As Object
     Dim txRow As Variant
@@ -1588,7 +1610,9 @@ Private Function BuildKontrollRow( _
                 End If
 
                 If Not IsEmpty(bokfortDate) And _
-                   IsDate(txRow("TransactionDate")) Then
+                   IsDate(txRow("TransactionDate")) And _
+                   CDate(txRow("TransactionDate")) >= periodeFra And _
+                   CDate(txRow("TransactionDate")) <= periodeTil Then
 
                     thisDiff = Abs(CDbl( _
                         CDate(txRow("TransactionDate")) - _
@@ -1734,6 +1758,50 @@ End Function
 '==============================================================
 ' OVERSIKT
 '==============================================================
+
+' Enkel liste - Regnr/input og forstegangsregistrering for hvert
+' kjoretoy som ble kjort denne runden. Star til hoyre for KPI-boksene
+' (kolonne P) sa den ikke kolliderer med pivottabellen i A11.
+Private Sub WriteFirstRegistrationOverviewList( _
+    ByVal ws As Worksheet, _
+    ByVal kontrollRows As Collection)
+
+    Const START_COL As String = "P"
+    Const START_ROW As Long = 4
+
+    Dim row As Object
+    Dim r As Long
+
+    ws.Range("P" & (START_ROW - 1) & ":Q" & _
+        (ws.rows.Count)).ClearContents
+
+    ws.Range(START_COL & (START_ROW - 1)).value = "Regnr / input"
+    ws.Range("Q" & (START_ROW - 1)).value = "Forstegangsregistrering"
+
+    With ws.Range(START_COL & (START_ROW - 1) & ":Q" & (START_ROW - 1))
+        .Font.Bold = True
+        .Font.Color = RGB(255, 255, 255)
+        .Interior.Color = RGB(31, 78, 120)
+    End With
+
+    r = START_ROW
+
+    For Each row In kontrollRows
+
+        ws.Cells(r, "P").value = VariantToString(row("RegnrInput"))
+        ws.Cells(r, "Q").value = row("Forstegangsregistrert")
+
+        r = r + 1
+
+    Next row
+
+    ws.Range("Q" & START_ROW & ":Q" & (r - 1)).NumberFormat = "dd.mm.yyyy"
+
+    ws.Columns("P").ColumnWidth = 16
+    ws.Columns("Q").ColumnWidth = 22
+
+End Sub
+
 
 Private Sub UpdateOverviewKPIs(ByVal ws As Worksheet)
 
@@ -1883,13 +1951,15 @@ Private Sub EnsureInputTable(ByVal ws As Worksheet)
     lastDataRow = Application.Max( _
         ws.Cells(ws.rows.Count, COL_REGNR).End(xlUp).Row, _
         ws.Cells(ws.rows.Count, COL_VIN).End(xlUp).Row, _
-        ws.Cells(ws.rows.Count, COL_BOKFORT).End(xlUp).Row)
+        ws.Cells(ws.rows.Count, COL_BOKFORT).End(xlUp).Row, _
+        ws.Cells(ws.rows.Count, COL_FORSTEREG).End(xlUp).Row)
 
     If lastDataRow < FIRST_ROW Then
         lastDataRow = FIRST_ROW
     End If
 
-    ' Bokfort-kolonnen har kanskje ingen overskrift enna (den er ny).
+    ' Bokfort- og Forstegangsregistrering-kolonnene har kanskje ingen
+    ' overskrift enna (de er nye).
     If Len(Trim$(CStr( _
         ws.Cells(headerRow, COL_BOKFORT).value & vbNullString))) = 0 Then
 
@@ -1897,9 +1967,16 @@ Private Sub EnsureInputTable(ByVal ws As Worksheet)
 
     End If
 
+    If Len(Trim$(CStr( _
+        ws.Cells(headerRow, COL_FORSTEREG).value & vbNullString))) = 0 Then
+
+        ws.Cells(headerRow, COL_FORSTEREG).value = "Forstegangsregistrering"
+
+    End If
+
     Set target = ws.Range( _
         ws.Cells(headerRow, COL_REGNR), _
-        ws.Cells(lastDataRow, COL_BOKFORT))
+        ws.Cells(lastDataRow, COL_FORSTEREG))
 
     Set lo = ws.ListObjects.Add(xlSrcRange, target, , xlYes)
     lo.Name = INPUT_TABLE
@@ -1909,9 +1986,59 @@ Private Sub EnsureInputTable(ByVal ws As Worksheet)
     lo.ListColumns(1).Name = "Regnr"
     lo.ListColumns(2).Name = "VIN"
     lo.ListColumns(3).Name = "Bokfort"
+    lo.ListColumns(4).Name = "Forstegangsregistrering"
 
     ws.Range(ws.Cells(FIRST_ROW, COL_BOKFORT), _
-        ws.Cells(lastDataRow, COL_BOKFORT)).NumberFormat = "dd.mm.yyyy"
+        ws.Cells(lastDataRow, COL_FORSTEREG)).NumberFormat = "dd.mm.yyyy"
+
+End Sub
+
+
+' Skriver forstegangsregistreringsdato tilbake til Input-arket for
+' hvert regnr/VIN som ble kjort, slik at den er synlig direkte pa
+' Input og ikke bare i Resultat/Oversikt/Kontroll solgte biler.
+' firstRegByKey er nokkelet pa samme BuildVehicleKey-format som queue.
+Private Sub WriteFirstRegistrationToInput( _
+    ByVal ws As Worksheet, _
+    ByVal firstRegByKey As Object)
+
+    Dim lastRow As Long
+    Dim r As Long
+    Dim rowRegNo As String
+    Dim rowVin As String
+    Dim rowKey As String
+    Dim regDate As Variant
+
+    lastRow = Application.Max( _
+        ws.Cells(ws.rows.Count, COL_REGNR).End(xlUp).Row, _
+        ws.Cells(ws.rows.Count, COL_VIN).End(xlUp).Row)
+
+    For r = FIRST_ROW To lastRow
+
+        rowRegNo = NormalizeIdentifier(ws.Cells(r, COL_REGNR).value)
+        rowVin = NormalizeIdentifier(ws.Cells(r, COL_VIN).value)
+        rowKey = BuildVehicleKey(rowVin, rowRegNo)
+
+        If Len(rowKey) > 0 Then
+
+            If firstRegByKey.Exists(rowKey) Then
+
+                regDate = firstRegByKey(rowKey)
+
+                If IsDate(regDate) Then
+                    ws.Cells(r, COL_FORSTEREG).value = CDate(regDate)
+                Else
+                    ws.Cells(r, COL_FORSTEREG).ClearContents
+                End If
+
+            End If
+
+        End If
+
+    Next r
+
+    ws.Range(ws.Cells(FIRST_ROW, COL_FORSTEREG), _
+        ws.Cells(lastRow, COL_FORSTEREG)).NumberFormat = "dd.mm.yyyy"
 
 End Sub
 
