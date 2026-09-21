@@ -1887,7 +1887,7 @@ Private Function BuildKontrollRow( _
 
     End If
 
-    ' Alle bilens eierskifter, sortert kronologisk (eldst forst),
+    ' Alle bilens eierskifter, sortert synkende (nyeste forst),
     ' til bruk for detaljradene i Kontroll solgte biler.
     Set sortertListe = SorterTransaksjonerPaDato(alleTransaksjoner)
     Set result("AlleTransaksjoner") = sortertListe
@@ -1898,7 +1898,7 @@ End Function
 
 
 ' Enkel innsettingssortering (fa elementer per bil, ytelse er ikke
-' et tema) - stigende pa TransactionDate.
+' et tema) - synkende pa TransactionDate (nyeste forst).
 Private Function SorterTransaksjonerPaDato( _
     ByVal txRows As Collection) As Collection
 
@@ -1913,7 +1913,7 @@ Private Function SorterTransaksjonerPaDato( _
 
         For i = 1 To sortert.Count
 
-            If CDate(txRow("TransactionDate")) < _
+            If CDate(txRow("TransactionDate")) > _
                 CDate(sortert(i)("TransactionDate")) Then
 
                 sortert.Add txRow, Before:=i
