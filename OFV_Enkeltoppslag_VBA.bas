@@ -25,6 +25,9 @@ Private Const REPORT_SHEET As String = "Kjoretoyrapport"
 Private Const COL_REGNR As String = "C4"
 Private Const COL_VIN As String = "D4"
 
+Private Const CELL_OFV_KEY As String = "B1"
+Private Const CELL_SVV_KEY As String = "B2"
+
 Private Const OFV_URL As String = _
     "https://api.ofv.no/transactions/v1/"
 
@@ -139,23 +142,21 @@ Public Sub OFV_SlaOppKjoretoy()
 
     stage = "leser API-nokler"
 
-    ofvKey = ReadApiKey("OFV_API")
-    svvKey = ReadApiKey("API_Key_Vegvesenet")
+    ofvKey = Trim$(CStr(wsInput.Range(CELL_OFV_KEY).Value))
+    svvKey = Trim$(CStr(wsInput.Range(CELL_SVV_KEY).Value))
 
     If Len(ofvKey) = 0 Then
         MsgBox _
-            "Fant ingen OFV-nokkel. Opprett et navngitt " & _
-            "omrade kalt ""OFV_API"" som peker pa cellen " & _
-            "med OFV API-nokkelen din.", _
+            "Fant ingen OFV-nokkel i " & wsInput.Name & "!" & _
+            CELL_OFV_KEY & ". Skriv inn OFV API-nokkelen der.", _
             vbExclamation, "Kjoretoyoppslag"
         Exit Sub
     End If
 
     If Len(svvKey) = 0 Then
         MsgBox _
-            "Fant ingen Vegvesen-nokkel. Opprett et navngitt " & _
-            "omrade kalt ""API_Key_Vegvesenet"" som peker pa " & _
-            "cellen med Vegvesenet-nokkelen din.", _
+            "Fant ingen Vegvesen-nokkel i " & wsInput.Name & "!" & _
+            CELL_SVV_KEY & ". Skriv inn Vegvesenet-nokkelen der.", _
             vbExclamation, "Kjoretoyoppslag"
         Exit Sub
     End If
@@ -260,16 +261,6 @@ Private Sub RestoreApplicationState( _
     Application.Calculation = calculationValue
 
 End Sub
-
-
-Private Function ReadApiKey(ByVal rangeName As String) As String
-
-    On Error Resume Next
-    ReadApiKey = Trim$(CStr( _
-        ThisWorkbook.Names(rangeName).RefersToRange.Value))
-    On Error GoTo 0
-
-End Function
 
 
 '==============================================================
