@@ -1,17 +1,18 @@
 Option Explicit
 
 '==============================================================
-' OFV ENKELTOPPSLAG - kjoretoyinfo + alle registreringer
+' OFV KJORETOYOPPSLAG - kjoretoyinfo + alle registreringer
 '
-' Leser Regnr fra celle C4 (og/eller VIN fra celle D4) pa
-' "Oppslag"-arket (eller det aktive arket, hvis "Oppslag" ikke
-' finnes), slar opp kjoretoyet mot Statens vegvesen (forstegangs-
+' Leser en liste med Regnr (kolonne C) og/eller VIN (kolonne D)
+' fra rad 5 og nedover pa "Oppslag"-arket (eller det aktive
+' arket, hvis "Oppslag" ikke finnes). For hvert kjoretoy i
+' listen slas det opp mot Statens vegvesen (kun forstegangs-
 ' registrering) og OFV Transactions API (alle eierskifter/
-' registreringer), og skriver et ryddig sammendrag til et eget
-' ark: "Kjoretoyrapport".
+' registreringer), og resultatet stables etter hverandre i
+' et eget ark: "Kjoretoyrapport" - en blokk per bil.
 '
-' Formal: raskt se om bilen star registrert pa et selskap eller
-' en privatperson, og se hele eierhistorikken.
+' Formal: raskt se om hver bil star registrert pa et selskap
+' eller en privatperson, og se hele eierhistorikken.
 '==============================================================
 
 
@@ -22,8 +23,11 @@ Option Explicit
 Private Const INPUT_SHEET As String = "Oppslag"
 Private Const REPORT_SHEET As String = "Kjoretoyrapport"
 
-Private Const COL_REGNR As String = "C4"
-Private Const COL_VIN As String = "D4"
+Private Const FIRST_DATA_ROW As Long = 5
+Private Const COL_REGNR As Long = 3   ' kolonne C
+Private Const COL_VIN As Long = 4     ' kolonne D
+
+Private Const REPORT_HEADER_ROW As Long = 5
 
 Private Const CELL_OFV_KEY As String = "B1"
 Private Const CELL_SVV_KEY As String = "B2"
@@ -91,6 +95,11 @@ Public Sub OFV_SlaOppKjoretoy()
     Dim svvKey As String
     Dim dateToISO As String
 
+    Dim queue As Object
+    Dim key As Variant
+    Dim vehicleData As Variant
+    Dim queueKey As String
+
     Dim regNo As String
     Dim vin As String
     Dim identifier As String
@@ -98,6 +107,15 @@ Public Sub OFV_SlaOppKjoretoy()
 
     Dim vehicleInfo As Object
     Dim transactions As Collection
+
+    Dim lastRegRow As Long
+    Dim lastVinRow As Long
+    Dim lastInputRow As Long
+    Dim inputRow As Long
+
+    Dim currentRow As Long
+    Dim vehicleIndex As Long
+    Dim totalVehicles As Long
 
     Dim stage As String
 
@@ -117,27 +135,41 @@ Public Sub OFV_SlaOppKjoretoy()
 
     If wsInput Is Nothing Then Set wsInput = ActiveSheet
 
-    stage = "leser Regnr/VIN fra " & wsInput.Name & _
-        "!" & COL_REGNR & "/" & COL_VIN
+    stage = "leser regnr/VIN-listen fra " & wsInput.Name & _
+        "!C" & FIRST_DATA_ROW & " og nedover"
 
-    regNo = NormalizeIdentifier(wsInput.Range(COL_REGNR).Value)
-    vin = NormalizeIdentifier(wsInput.Range(COL_VIN).Value)
+    lastRegRow = _
+        wsInput.Cells(wsInput.Rows.Count, COL_REGNR).End(xlUp).Row
 
-    If Len(regNo) = 0 And Len(vin) = 0 Then
+    lastVinRow = _
+        wsInput.Cells(wsInput.Rows.Count, COL_VIN).End(xlUp).Row
+
+    lastInputRow = Application.Max(lastRegRow, lastVinRow)
+
+    Set queue = CreateObject("Scripting.Dictionary")
+    queue.CompareMode = vbTextCompare
+
+    For inputRow = FIRST_DATA_ROW To lastInputRow
+
+        regNo = NormalizeIdentifier(wsInput.Cells(inputRow, COL_REGNR).Value)
+        vin = NormalizeIdentifier(wsInput.Cells(inputRow, COL_VIN).Value)
+
+        queueKey = BuildVehicleKey(vin, regNo)
+
+        If Len(queueKey) > 0 Then
+            If Not queue.Exists(queueKey) Then
+                queue.Add queueKey, Array(regNo, vin)
+            End If
+        End If
+
+    Next inputRow
+
+    If queue.Count = 0 Then
         MsgBox _
-            "Fyll inn registreringsnummer i " & COL_REGNR & _
-            " eller VIN i " & COL_VIN & " pa arket """ & _
-            wsInput.Name & """.", _
-            vbExclamation, "Kjoretoyoppslag"
+            "Fant ingen registreringsnummer eller VIN i " & _
+            wsInput.Name & "!C" & FIRST_DATA_ROW & " og nedover.", _
+            vbInformation, "Kjoretoyoppslag"
         Exit Sub
-    End If
-
-    useVin = (Len(vin) > 0)
-
-    If useVin Then
-        identifier = vin
-    Else
-        identifier = regNo
     End If
 
     stage = "leser API-nokler"
@@ -174,37 +206,70 @@ Public Sub OFV_SlaOppKjoretoy()
     Application.Cursor = xlWait
     applicationChanged = True
 
-    '----------------------------------------------------------
-    ' STATENS VEGVESEN - forstegangsregistrering
-    '----------------------------------------------------------
+    totalVehicles = queue.Count
 
-    stage = "henter forstegangsregistrering fra Statens vegvesen"
-    Application.StatusBar = "Statens vegvesen | " & identifier
-
-    Set vehicleInfo = FetchVehicleInfoFromSVV(svvKey, regNo, vin)
-
-    '----------------------------------------------------------
-    ' OFV - alle registreringer/eierskifter
-    '----------------------------------------------------------
-
-    stage = "henter registreringer fra OFV"
-    Application.StatusBar = "OFV | " & identifier
-
-    Set transactions = FetchOFVTransactions( _
-        ofvKey, identifier, useVin, regNo, vin, _
-        OFV_DATE_FROM, dateToISO)
-
-    '----------------------------------------------------------
-    ' SKRIV RAPPORT
-    '----------------------------------------------------------
-
-    stage = "skriver rapportarket"
-    Application.StatusBar = "Excel | Skriver rapport"
+    stage = "forbereder rapportarket"
 
     Set wsReport = GetOrCreateReportSheet(REPORT_SHEET)
+    WriteGlobalHeader wsReport, totalVehicles
 
-    WriteReportSheet _
-        wsReport, regNo, vin, identifier, vehicleInfo, transactions
+    currentRow = REPORT_HEADER_ROW + 1
+    vehicleIndex = 0
+
+    For Each key In queue.Keys
+
+        vehicleIndex = vehicleIndex + 1
+        vehicleData = queue(key)
+
+        regNo = CStr(vehicleData(0))
+        vin = CStr(vehicleData(1))
+        useVin = (Len(vin) > 0)
+
+        If useVin Then
+            identifier = vin
+        Else
+            identifier = regNo
+        End If
+
+        '------------------------------------------------------
+        ' STATENS VEGVESEN - forstegangsregistrering
+        '------------------------------------------------------
+
+        stage = "henter forstegangsregistrering (" & identifier & ")"
+
+        Application.StatusBar = "Bil " & vehicleIndex & " av " & _
+            totalVehicles & " | Statens vegvesen | " & identifier
+
+        Set vehicleInfo = FetchVehicleInfoFromSVV(svvKey, regNo, vin)
+
+        '------------------------------------------------------
+        ' OFV - alle registreringer/eierskifter
+        '------------------------------------------------------
+
+        stage = "henter registreringer fra OFV (" & identifier & ")"
+
+        Application.StatusBar = "Bil " & vehicleIndex & " av " & _
+            totalVehicles & " | OFV | " & identifier
+
+        Set transactions = FetchOFVTransactions( _
+            ofvKey, identifier, useVin, regNo, vin, _
+            OFV_DATE_FROM, dateToISO)
+
+        '------------------------------------------------------
+        ' SKRIV BLOKK FOR DENNE BILEN
+        '------------------------------------------------------
+
+        currentRow = WriteVehicleBlock( _
+            wsReport, currentRow, vehicleIndex, _
+            regNo, vin, vehicleInfo, transactions)
+
+        SafePause API_PAUSE_MS
+
+    Next key
+
+    stage = "formaterer rapportarket"
+
+    ApplyReportColumnWidths wsReport
 
     Application.Calculation = oldCalculation
     Application.StatusBar = False
@@ -218,7 +283,7 @@ Public Sub OFV_SlaOppKjoretoy()
     wsReport.Range("B2").Select
 
     MsgBox _
-        "Rapport for " & identifier & " er klar pa arket """ & _
+        totalVehicles & " kjoretoy er slatt opp og lagt i arket """ & _
         REPORT_SHEET & """.", _
         vbInformation, "Kjoretoyoppslag"
 
@@ -728,13 +793,71 @@ Private Function GetOrCreateReportSheet( _
 End Function
 
 
-Private Sub WriteReportSheet( _
+Private Sub WriteGlobalHeader( _
+    ByVal ws As Worksheet, ByVal vehicleCount As Long)
+
+    ws.Range("B2").Value = "Kjoretoyrapport"
+
+    With ws.Range("B2")
+        .Font.Size = 18
+        .Font.Bold = True
+        .Font.Color = RGB(31, 78, 120)
+    End With
+
+    ws.Range("B3").Value = _
+        "Generert: " & Format$(Now, "dd.mm.yyyy hh:nn") & _
+        "   |   Antall kjoretoy: " & vehicleCount
+
+    ws.Range("B3").Font.Italic = True
+    ws.Range("B3").Font.Color = RGB(100, 100, 100)
+
+    WriteTableHeaderRow ws, REPORT_HEADER_ROW
+
+End Sub
+
+
+Private Sub WriteTableHeaderRow(ByVal ws As Worksheet, ByVal r As Long)
+
+    ws.Range("B" & r).Value = "Regnr"
+    ws.Range("C" & r).Value = "VIN"
+    ws.Range("D" & r).Value = "Merke"
+    ws.Range("E" & r).Value = "Modell"
+    ws.Range("F" & r).Value = "Drivstoff"
+    ws.Range("G" & r).Value = "Forstegangsreg."
+    ws.Range("H" & r).Value = "Naaverende registrering"
+    ws.Range("I" & r).Value = "Dato"
+    ws.Range("J" & r).Value = "Type registrering"
+    ws.Range("K" & r).Value = "Solgt av"
+    ws.Range("L" & r).Value = "Solgt til"
+    ws.Range("M" & r).Value = "Fylke (kjoper)"
+    ws.Range("N" & r).Value = "Status"
+
+    With ws.Range("B" & r & ":N" & r)
+        .Font.Bold = True
+        .Font.Color = RGB(255, 255, 255)
+        .Interior.Color = RGB(31, 78, 120)
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+        .WrapText = True
+        .RowHeight = 30
+    End With
+
+End Sub
+
+
+'==============================================================
+' EN BLOKK PER BIL - kjoretoyinfo vises 1 gang (flettet celler),
+' alle registreringer listes radvis rett under.
+'==============================================================
+
+Private Function WriteVehicleBlock( _
     ByVal ws As Worksheet, _
+    ByVal startRow As Long, _
+    ByVal vehicleIndex As Long, _
     ByVal regNoInput As String, _
     ByVal vinInput As String, _
-    ByVal identifier As String, _
     ByVal vehicleInfo As Object, _
-    ByVal transactions As Collection)
+    ByVal transactions As Collection) As Long
 
     Dim okTxns As Collection
     Dim allTxns() As Object
@@ -745,11 +868,14 @@ Private Sub WriteReportSheet( _
     Dim currentOwnerLabel As String
     Dim ownerColor As Long
     Dim ownerFontColor As Long
+    Dim blockFillColor As Long
 
     Dim firstRegText As String
     Dim r As Long
     Dim i As Long
     Dim n As Long
+    Dim rowCount As Long
+    Dim lastRow As Long
 
     '----------------------------------------------------------
     ' Finn "siste" (nyeste) OK-registrering
@@ -769,101 +895,13 @@ Private Sub WriteReportSheet( _
         Set latest = okTxns(okTxns.Count)
     End If
 
-    '----------------------------------------------------------
-    ' Overskrift
-    '----------------------------------------------------------
-
-    ws.Range("B2").Value = "Kjoretoyrapport"
-
-    With ws.Range("B2")
-        .Font.Size = 18
-        .Font.Bold = True
-        .Font.Color = RGB(31, 78, 120)
-    End With
-
-    ws.Range("B3").Value = _
-        "Generert: " & Format$(Now, "dd.mm.yyyy hh:nn") & _
-        "   |   Oppslag: " & identifier
-
-    ws.Range("B3").Font.Italic = True
-    ws.Range("B3").Font.Color = RGB(100, 100, 100)
+    n = transactions.Count
+    rowCount = Application.Max(1, n)
+    lastRow = startRow + rowCount - 1
 
     '----------------------------------------------------------
-    ' Kjoretoyinformasjon
+    ' Naaverende registrering (selskap eller privatperson)
     '----------------------------------------------------------
-
-    r = 5
-    WriteSectionHeader ws, r, "Kjoretoyinformasjon"
-    r = r + 1
-
-    WriteInfoRow ws, r, "Regnr", _
-        FirstNonEmpty(FieldOrEmpty(latest, "RegNo"), regNoInput)
-    r = r + 1
-
-    WriteInfoRow ws, r, "Chassisnummer (VIN)", _
-        FirstNonEmpty(FieldOrEmpty(latest, "ChassisNumber"), vinInput)
-    r = r + 1
-
-    WriteInfoRow ws, r, "Merke", FieldOrEmpty(latest, "MakeName")
-    r = r + 1
-
-    WriteInfoRow ws, r, "Modell", FieldOrEmpty(latest, "ModelName")
-    r = r + 1
-
-    WriteInfoRow ws, r, "Drivstoffgruppe", FieldOrEmpty(latest, "FuelGroup")
-    r = r + 1
-
-    WriteInfoRow ws, r, "Siste registreringstype", _
-        FieldOrEmpty(latest, "RegistrationType")
-    r = r + 1
-
-    WriteInfoRow ws, r, "Leaset", _
-        YesNoOrEmpty(FieldOrEmpty(latest, "IsLeased"))
-    r = r + 1
-
-    WriteInfoRow ws, r, "Bruktimportert", _
-        YesNoOrEmpty(FieldOrEmpty(latest, "IsUsedImported"))
-    r = r + 1
-
-    WriteInfoRow ws, r, "Karosseritype", FieldOrEmpty(latest, "ChassisName")
-    r = r + 1
-
-    WriteInfoRow ws, r, "Girkasse", FieldOrEmpty(latest, "Transmission")
-    r = r + 1
-
-    WriteInfoRow ws, r, "Kjoretoygruppe", _
-        FieldOrEmpty(latest, "VehicleGroupName")
-    r = r + 1
-
-    If Not latest Is Nothing Then
-        If IsDate(latest("NextInspectionDate")) Then
-            WriteInfoRow ws, r, "Neste frist EU-kontroll", _
-                Format$(latest("NextInspectionDate"), "dd.mm.yyyy")
-            r = r + 1
-        End If
-    End If
-
-    If vehicleInfo.Exists("FirstRegistrationDate") Then
-        If IsDate(vehicleInfo("FirstRegistrationDate")) Then
-            firstRegText = Format$( _
-                vehicleInfo("FirstRegistrationDate"), "dd.mm.yyyy")
-        End If
-    End If
-
-    If Len(firstRegText) = 0 Then
-        firstRegText = "Ukjent (" & _
-            VariantToString(vehicleInfo("Status")) & ")"
-    End If
-
-    WriteInfoRow ws, r, "Forstegangsregistrert i Norge", firstRegText
-    r = r + 2
-
-    '----------------------------------------------------------
-    ' Naerverende registrering (selskap eller privatperson)
-    '----------------------------------------------------------
-
-    WriteSectionHeader ws, r, "Naaverende registrering"
-    r = r + 1
 
     If hasLatest Then
 
@@ -884,88 +922,74 @@ Private Sub WriteReportSheet( _
         End If
 
     Else
-        currentOwnerLabel = "Ukjent (ingen registreringer funnet i OFV)"
+        currentOwnerLabel = "Ukjent (ingen registreringer funnet)"
         ownerColor = RGB(242, 242, 242)
         ownerFontColor = RGB(89, 89, 89)
     End If
 
-    ws.Range("B" & r).Value = "Registrert paa:"
-    ws.Range("B" & r).Font.Bold = True
+    '----------------------------------------------------------
+    ' Forstegangsregistrert (kun fra Statens vegvesen)
+    '----------------------------------------------------------
 
-    With ws.Range("C" & r & ":E" & r)
-        .Merge
-        .Value = currentOwnerLabel
-        .Font.Bold = True
-        .Font.Size = 12
-        .Font.Color = ownerFontColor
-        .Interior.Color = ownerColor
-        .HorizontalAlignment = xlLeft
-        .VerticalAlignment = xlCenter
-        .RowHeight = 22
-    End With
-
-    r = r + 1
-
-    If hasLatest Then
-
-        WriteInfoRow ws, r, "Eiertype (raadata OFV)", _
-            FieldOrEmpty(latest, "ToOwnerType")
-        r = r + 1
-
-        WriteInfoRow ws, r, "Fylke", FieldOrEmpty(latest, "ToOwnerCounty")
-        r = r + 1
-
-        If IsDate(latest("TransactionDate")) Then
-            WriteInfoRow ws, r, "Dato siste eierskifte", _
-                Format$(latest("TransactionDate"), "dd.mm.yyyy")
-        Else
-            WriteInfoRow ws, r, "Dato siste eierskifte", ""
+    If vehicleInfo.Exists("FirstRegistrationDate") Then
+        If IsDate(vehicleInfo("FirstRegistrationDate")) Then
+            firstRegText = Format$( _
+                vehicleInfo("FirstRegistrationDate"), "dd.mm.yyyy")
         End If
-
-        r = r + 1
-
     End If
 
-    r = r + 1
+    If Len(firstRegText) = 0 Then firstRegText = "Ukjent"
+
+    If vehicleIndex Mod 2 = 0 Then
+        blockFillColor = RGB(246, 249, 252)
+    Else
+        blockFillColor = RGB(255, 255, 255)
+    End If
 
     '----------------------------------------------------------
-    ' Tabell: alle registreringer (nyeste oeverst)
+    ' Kjoretoyinfo - flettet, vises EN gang for hele bilen
     '----------------------------------------------------------
 
-    WriteSectionHeader ws, r, "Alle registreringer"
-    r = r + 1
+    ws.Range("B" & startRow & ":B" & lastRow).Merge
+    ws.Range("B" & startRow).Value = _
+        FirstNonEmpty(FieldOrEmpty(latest, "RegNo"), regNoInput)
 
-    Dim headerRow As Long
-    headerRow = r
+    ws.Range("C" & startRow & ":C" & lastRow).Merge
+    ws.Range("C" & startRow).Value = _
+        FirstNonEmpty(FieldOrEmpty(latest, "ChassisNumber"), vinInput)
 
-    ws.Range("B" & headerRow).Value = "Dato"
-    ws.Range("C" & headerRow).Value = "Regnr"
-    ws.Range("D" & headerRow).Value = "Type registrering"
-    ws.Range("E" & headerRow).Value = "Solgt av"
-    ws.Range("F" & headerRow).Value = "Solgt til"
-    ws.Range("G" & headerRow).Value = "Fylke (kjoper)"
-    ws.Range("H" & headerRow).Value = "Merke"
-    ws.Range("I" & headerRow).Value = "Modell"
-    ws.Range("J" & headerRow).Value = "Status"
+    ws.Range("D" & startRow & ":D" & lastRow).Merge
+    ws.Range("D" & startRow).Value = FieldOrEmpty(latest, "MakeName")
 
-    With ws.Range("B" & headerRow & ":J" & headerRow)
+    ws.Range("E" & startRow & ":E" & lastRow).Merge
+    ws.Range("E" & startRow).Value = FieldOrEmpty(latest, "ModelName")
+
+    ws.Range("F" & startRow & ":F" & lastRow).Merge
+    ws.Range("F" & startRow).Value = FieldOrEmpty(latest, "FuelGroup")
+
+    ws.Range("G" & startRow & ":G" & lastRow).Merge
+    ws.Range("G" & startRow).Value = firstRegText
+
+    ws.Range("H" & startRow & ":H" & lastRow).Merge
+    ws.Range("H" & startRow).Value = currentOwnerLabel
+
+    With ws.Range("B" & startRow & ":G" & lastRow)
         .Font.Bold = True
-        .Font.Color = RGB(255, 255, 255)
-        .Interior.Color = RGB(31, 78, 120)
         .HorizontalAlignment = xlCenter
         .VerticalAlignment = xlCenter
         .WrapText = True
-        .RowHeight = 28
     End With
 
-    r = headerRow + 1
+    '----------------------------------------------------------
+    ' Registreringsrader (I:N) - en rad per registrering,
+    ' eldste oeverst (leses som historikk nedover).
+    '----------------------------------------------------------
 
-    n = transactions.Count
+    r = startRow
 
     If n = 0 Then
 
-        ws.Range("B" & r).Value = "Ingen registreringer funnet."
-        r = r + 1
+        ws.Range("N" & r).Value = "Ingen registreringer funnet i OFV"
 
     Else
 
@@ -977,43 +1001,33 @@ Private Sub WriteReportSheet( _
             Set allTxns(i) = t
         Next t
 
-        ' Skriv nyeste registrering oeverst (transaksjonene kommer
-        ' i stigende datorekkefolge fra OFV, saa vi reverserer).
-        For i = n To 1 Step -1
+        For i = 1 To n
 
             Set t = allTxns(i)
 
             If VariantToString(t("Status")) = "OK" Then
 
                 If IsDate(t("TransactionDate")) Then
-                    ws.Range("B" & r).Value = _
+                    ws.Range("I" & r).Value = _
                         Format$(t("TransactionDate"), "dd.mm.yyyy")
                 End If
 
-                ws.Range("C" & r).Value = FieldOrEmpty(t, "RegNo")
-                ws.Range("D" & r).Value = _
+                ws.Range("J" & r).Value = _
                     FieldOrEmpty(t, "RegistrationType")
 
-                ws.Range("E" & r).Value = FriendlyOwnerLabel( _
+                ws.Range("K" & r).Value = FriendlyOwnerLabel( _
                     VariantToString(t("FromOwnerType")), _
                     VariantToString(t("FromOwnerCompanyName")))
 
-                ws.Range("F" & r).Value = FriendlyOwnerLabel( _
+                ws.Range("L" & r).Value = FriendlyOwnerLabel( _
                     VariantToString(t("ToOwnerType")), _
                     VariantToString(t("ToOwnerCompanyName")))
 
-                ws.Range("G" & r).Value = _
-                    FieldOrEmpty(t, "ToOwnerCounty")
-
-                ws.Range("H" & r).Value = FieldOrEmpty(t, "MakeName")
-                ws.Range("I" & r).Value = FieldOrEmpty(t, "ModelName")
-                ws.Range("J" & r).Value = "OK"
+                ws.Range("M" & r).Value = FieldOrEmpty(t, "ToOwnerCounty")
+                ws.Range("N" & r).Value = "OK"
 
             Else
-
-                ws.Range("C" & r).Value = FieldOrEmpty(t, "RegNo")
-                ws.Range("J" & r).Value = VariantToString(t("Status"))
-
+                ws.Range("N" & r).Value = VariantToString(t("Status"))
             End If
 
             r = r + 1
@@ -1022,64 +1036,56 @@ Private Sub WriteReportSheet( _
 
     End If
 
-    Dim lastDataRow As Long
-    lastDataRow = r - 1
-
-    If lastDataRow >= headerRow + 1 Then
-
-        With ws.Range( _
-            "B" & (headerRow + 1) & ":J" & lastDataRow).Borders
-            .LineStyle = xlContinuous
-            .Color = RGB(217, 226, 243)
-            .Weight = xlThin
-        End With
-
-    End If
-
     '----------------------------------------------------------
-    ' Formatering
+    ' Bakgrunn, uthevet "naaverende registrering" og kantlinjer
     '----------------------------------------------------------
 
-    ws.Columns("A").ColumnWidth = 2
-    ws.Columns("B").ColumnWidth = 26
-    ws.Columns("C").ColumnWidth = 14
-    ws.Columns("D").ColumnWidth = 20
-    ws.Columns("E").ColumnWidth = 26
-    ws.Columns("F").ColumnWidth = 26
-    ws.Columns("G").ColumnWidth = 16
-    ws.Columns("H").ColumnWidth = 16
-    ws.Columns("I").ColumnWidth = 20
-    ws.Columns("J").ColumnWidth = 30
-
-End Sub
-
-
-Private Sub WriteSectionHeader( _
-    ByVal ws As Worksheet, ByVal r As Long, ByVal text As String)
-
-    With ws.Range("B" & r & ":J" & r)
-        .Merge
-        .Value = text
-        .Font.Bold = True
-        .Font.Size = 12
-        .Font.Color = RGB(255, 255, 255)
-        .Interior.Color = RGB(68, 114, 148)
-        .HorizontalAlignment = xlLeft
+    With ws.Range("B" & startRow & ":N" & lastRow)
+        .Interior.Color = blockFillColor
         .VerticalAlignment = xlCenter
-        .RowHeight = 20
     End With
 
-End Sub
+    With ws.Range("H" & startRow)
+        .Font.Bold = True
+        .Font.Color = ownerFontColor
+        .Interior.Color = ownerColor
+        .HorizontalAlignment = xlCenter
+    End With
+
+    With ws.Range("B" & startRow & ":N" & lastRow).Borders
+        .LineStyle = xlContinuous
+        .Color = RGB(221, 226, 243)
+        .Weight = xlThin
+    End With
+
+    With ws.Range("B" & startRow & ":N" & lastRow) _
+        .Borders(xlEdgeBottom)
+        .LineStyle = xlContinuous
+        .Color = RGB(150, 150, 150)
+        .Weight = xlMedium
+    End With
+
+    WriteVehicleBlock = lastRow + 1
+
+End Function
 
 
-Private Sub WriteInfoRow( _
-    ByVal ws As Worksheet, ByVal r As Long, _
-    ByVal label As String, ByVal value As String)
+Private Sub ApplyReportColumnWidths(ByVal ws As Worksheet)
 
-    ws.Range("B" & r).Value = label
-    ws.Range("B" & r).Font.Bold = True
-    ws.Range("C" & r & ":E" & r).Merge
-    ws.Range("C" & r).Value = value
+    ws.Columns("A").ColumnWidth = 2
+    ws.Columns("B").ColumnWidth = 12
+    ws.Columns("C").ColumnWidth = 20
+    ws.Columns("D").ColumnWidth = 14
+    ws.Columns("E").ColumnWidth = 18
+    ws.Columns("F").ColumnWidth = 14
+    ws.Columns("G").ColumnWidth = 15
+    ws.Columns("H").ColumnWidth = 24
+    ws.Columns("I").ColumnWidth = 13
+    ws.Columns("J").ColumnWidth = 20
+    ws.Columns("K").ColumnWidth = 22
+    ws.Columns("L").ColumnWidth = 22
+    ws.Columns("M").ColumnWidth = 16
+    ws.Columns("N").ColumnWidth = 26
 
 End Sub
 
@@ -1097,20 +1103,6 @@ Private Function FieldOrEmpty( _
     Else
         FieldOrEmpty = vbNullString
     End If
-
-End Function
-
-
-Private Function YesNoOrEmpty(ByVal value As String) As String
-
-    Select Case LCase$(Trim$(value))
-        Case "true", "1", "-1"
-            YesNoOrEmpty = "Ja"
-        Case "false", "0"
-            YesNoOrEmpty = "Nei"
-        Case Else
-            YesNoOrEmpty = value
-    End Select
 
 End Function
 
@@ -1151,6 +1143,20 @@ Private Function NormalizeIdentifier(ByVal value As Variant) As String
 
     NormalizeIdentifier = UCase$(Trim$(Replace( _
         CStr(value & vbNullString), " ", vbNullString)))
+
+End Function
+
+
+Private Function BuildVehicleKey( _
+    ByVal vin As String, ByVal regNo As String) As String
+
+    If Len(vin) > 0 Then
+        BuildVehicleKey = "VIN|" & vin
+    ElseIf Len(regNo) > 0 Then
+        BuildVehicleKey = "REG|" & regNo
+    Else
+        BuildVehicleKey = vbNullString
+    End If
 
 End Function
 
