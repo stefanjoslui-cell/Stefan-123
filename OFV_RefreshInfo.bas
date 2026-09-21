@@ -42,6 +42,7 @@ Private Const PIVOT_NAME As String = "TransaksjonsPivot"
 Private Const FIRST_ROW As Long = 5
 Private Const COL_REGNR As Long = 2
 Private Const COL_VIN As Long = 3
+Private Const COL_BOKFORT As Long = 4
 
 Private Const OFV_URL As String = _
     "https://data.ofv.no/transactions/v1/query"
@@ -49,6 +50,15 @@ Private Const OFV_URL As String = _
 Private Const MAX_RETRIES As Long = 4
 Private Const RETRY_WAIT_MS As Long = 3000
 Private Const API_PAUSE_MS As Long = 150
+
+' Fargekoder for "Dager avvik" i Kontroll solgte biler
+' (samme paletter som Excels innebygde Bra/Noytral/Darlig-stiler).
+Private Const COLOR_GREEN_FILL As Long = 13561798   ' RGB(198,239,206)
+Private Const COLOR_GREEN_FONT As Long = 24832      ' RGB(0,97,0)
+Private Const COLOR_YELLOW_FILL As Long = 10284031  ' RGB(255,235,156)
+Private Const COLOR_YELLOW_FONT As Long = 26012     ' RGB(156,101,0)
+Private Const COLOR_RED_FILL As Long = 13551615     ' RGB(255,199,206)
+Private Const COLOR_RED_FONT As Long = 393372       ' RGB(156,0,6)
 
 
 '==============================================================
@@ -65,13 +75,17 @@ Public Sub OFV_RefreshInfo()
 
     Dim queue As Object
     Dim hitVehicles As Object
+    Dim vehicleRowsByKey As Object
     Dim resultRow As Object
 
     Dim allRows As Collection
     Dim vehicleRows As Collection
+    Dim kontrollRows As Collection
+    Dim vehicleTxRows As Collection
 
     Dim fieldMap As Variant
     Dim vehicleData As Variant
+    Dim bokfortValue As Variant
     Dim output() As Variant
 
     Dim ofvKey As String
@@ -206,11 +220,13 @@ Public Sub OFV_RefreshInfo()
         vin = NormalizeIdentifier( _
             wsInput.Cells(r, COL_VIN).value)
 
+        bokfortValue = wsInput.Cells(r, COL_BOKFORT).value
+
         queueKey = BuildVehicleKey(vin, regNo)
 
         If Len(queueKey) > 0 Then
             If Not queue.Exists(queueKey) Then
-                queue.Add queueKey, Array(regNo, vin)
+                queue.Add queueKey, Array(regNo, vin, bokfortValue)
             End If
         End If
 
@@ -239,6 +255,13 @@ Public Sub OFV_RefreshInfo()
         CreateObject("Scripting.Dictionary")
 
     hitVehicles.CompareMode = vbTextCompare
+
+    Set vehicleRowsByKey = _
+        CreateObject("Scripting.Dictionary")
+
+    vehicleRowsByKey.CompareMode = vbTextCompare
+
+    Set kontrollRows = New Collection
 
     fieldMap = GetFieldMap()
     fieldCount = UBound(fieldMap) + 1
@@ -282,6 +305,10 @@ Public Sub OFV_RefreshInfo()
             DateFromISO, _
             dateToISO)
 
+        If Not vehicleRowsByKey.Exists(CStr(key)) Then
+            vehicleRowsByKey.Add CStr(key), New Collection
+        End If
+
         For Each resultRow In vehicleRows
 
             statusText = VariantToString( _
@@ -291,8 +318,8 @@ Public Sub OFV_RefreshInfo()
 
                 transactionCount = transactionCount + 1
 
-                If Not hitVehicles.Exists(queueKey) Then
-                    hitVehicles.Add queueKey, True
+                If Not hitVehicles.Exists(CStr(key)) Then
+                    hitVehicles.Add CStr(key), True
                 End If
 
             ElseIf Left$(statusText, 5) = "Feil:" Then
@@ -307,6 +334,7 @@ Public Sub OFV_RefreshInfo()
             End If
 
             allRows.Add resultRow
+            vehicleRowsByKey(CStr(key)).Add resultRow
 
         Next resultRow
 
@@ -318,6 +346,28 @@ Public Sub OFV_RefreshInfo()
             totalVehicles
 
         Sleep API_PAUSE_MS
+
+    Next key
+
+    '==========================================================
+    ' KONTROLL SOLGTE BILER - en rad per kjoretoy
+    '==========================================================
+
+    For Each key In queue.Keys
+
+        vehicleData = queue(key)
+
+        Set vehicleTxRows = Nothing
+
+        If vehicleRowsByKey.Exists(CStr(key)) Then
+            Set vehicleTxRows = vehicleRowsByKey(CStr(key))
+        End If
+
+        kontrollRows.Add BuildKontrollRow( _
+            CStr(vehicleData(0)), _
+            CStr(vehicleData(1)), _
+            vehicleData(2), _
+            vehicleTxRows)
 
     Next key
 
@@ -437,7 +487,9 @@ Public Sub OFV_RefreshInfo()
         "Excel", _
         "Oppdaterer Kontroll solgte biler"
 
-    UpdateControlSheet wsControl
+    UpdateControlSheet _
+        wsControl, kontrollRows, totalVehicles, _
+        CDate(dateFrom), CDate(dateTo)
 
     Application.Calculation = oldCalculation
 
@@ -1188,109 +1240,185 @@ End Sub
 ' KONTROLL SOLGTE BILER
 '==============================================================
 
-Private Sub UpdateControlSheet(ByVal ws As Worksheet)
+' Bygger hele arket pa nytt hver kjoring - tittel, KPI-bokser,
+' fargekodelegende og en rad per kjoretoy - fra kontrollRows (bygget
+' av BuildKontrollRow). Ingen levende Excel-formler her lenger: alt
+' regnes ut i VBA og skrives som faste verdier, akkurat som Resultat
+' og Oversikt for ovrig.
+Private Sub UpdateControlSheet( _
+    ByVal ws As Worksheet, _
+    ByVal kontrollRows As Collection, _
+    ByVal totalVehicles As Long, _
+    ByVal dateFrom As Date, _
+    ByVal dateTo As Date)
 
-    Dim loInput As ListObject
-    Dim inputData As Variant
-    Dim inputCount As Long
-    Dim lastRow As Long
+    Const HEADER_ROW As Long = 9
+    Const FIRST_DATA_ROW As Long = 10
+
+    Dim row As Object
     Dim r As Long
+    Dim lastRow As Long
 
-    Set loInput = ThisWorkbook.Worksheets( _
-        INPUT_SHEET).ListObjects(INPUT_TABLE)
+    Dim kontrollerteBiler As Long
+    Dim bilerMed0Dager As Long
+    Dim bucket0 As Long
+    Dim bucket1til15 As Long
+    Dim bucketOver15 As Long
 
-    If Not loInput.DataBodyRange Is Nothing Then
+    Dim kontrollertText As String
+    Dim dagerAvvik As Variant
+    Dim bucketColor As Long
+    Dim bucketFontColor As Long
 
-        inputData = loInput.DataBodyRange.Value2
+    ws.Cells.Clear
 
-        For r = 1 To UBound(inputData, 1)
+    '----------------------------------------------------------
+    ' Tittel og undertekst
+    '----------------------------------------------------------
 
-            If Len(Trim$(CStr( _
-                inputData(r, 1) & vbNullString))) > 0 Or _
-               Len(Trim$(CStr( _
-                inputData(r, 2) & vbNullString))) > 0 Then
+    ws.Range("A1:M1").Merge
+    ws.Range("A1").value = CONTROL_SHEET
 
-                inputCount = inputCount + 1
+    With ws.Range("A1")
+        .Font.Bold = True
+        .Font.Size = 14
+        .Font.Color = RGB(255, 255, 255)
+        .Interior.Color = RGB(31, 78, 120)
+        .HorizontalAlignment = xlLeft
+        .VerticalAlignment = xlCenter
+    End With
+
+    ws.rows(1).RowHeight = 26
+
+    ws.Range("A2:M2").Merge
+    ws.Range("A2").value = _
+        "En rad per bil. Bokfort dato sammenlignes med " & _
+        "forstegangsregistrering og det eierskiftet som ligger " & _
+        "naermest bokforingsdatoen. Kolonnen " & Chr$(171) & _
+        "Naermeste hendelse" & Chr$(187) & _
+        " viser hvilken dato som er naermest."
+
+    ws.Range("A2").Font.Italic = True
+
+    '----------------------------------------------------------
+    ' Tell opp KPI-er fra kontrollRows
+    '----------------------------------------------------------
+
+    For Each row In kontrollRows
+
+        kontrollertText = VariantToString(row("Kontrollert"))
+
+        If kontrollertText = "Ja" Then
+
+            kontrollerteBiler = kontrollerteBiler + 1
+            dagerAvvik = row("DagerAvvik")
+
+            If IsNumeric(dagerAvvik) Then
+
+                If CLng(dagerAvvik) = 0 Then
+                    bilerMed0Dager = bilerMed0Dager + 1
+                    bucket0 = bucket0 + 1
+                ElseIf CLng(dagerAvvik) <= 15 Then
+                    bucket1til15 = bucket1til15 + 1
+                Else
+                    bucketOver15 = bucketOver15 + 1
+                End If
 
             End If
 
-        Next r
+        End If
 
-    End If
+    Next row
 
-    lastRow = 9 + Application.Max(1, inputCount)
+    '----------------------------------------------------------
+    ' KPI-bokser (rad 4-6)
+    '----------------------------------------------------------
 
-    'Den permanente spillformelen ligger i A10.
-    'Den skal aldri slettes eller skrives på nytt.
-    If Not ws.Range("A10").HasFormula Then
+    ws.Range("A4:B4").Merge : ws.Range("A4").value = "Inputbiler"
+    ws.Range("C4:D4").Merge : ws.Range("C4").value = "Kontrollerte biler"
+    ws.Range("E4:F4").Merge : ws.Range("E4").value = "Biler med 0 dager"
+    ws.Range("G4").value = "Fra dato"
+    ws.Range("H4").value = "Til dato"
+    ws.Range("I4:M4").Merge
+    ws.Range("I4").value = "FARGEKODER - DAGER AVVIK"
 
-        Err.Raise vbObjectError + 1100, _
-            "UpdateControlSheet", _
-            "Den dynamiske formelen mangler i " & _
-            CONTROL_SHEET & "!A10."
+    With ws.Range("A4:M4")
+        .Font.Bold = True
+        .Interior.Color = RGB(221, 235, 247)
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+    End With
 
-    End If
+    ws.Range("A5:B5").Merge
+    ws.Range("A5").value = totalVehicles
 
-    ws.Range("A9").value = _
-        "Datakilde naermeste hendelse"
+    ws.Range("C5:D5").Merge
+    ws.Range("C5").value = kontrollerteBiler
 
-    ws.Range("B9").value = "Regnr / input"
-    ws.Range("C9").value = "Chassisnummer"
-    ws.Range("D9").value = "Modell"
-    ws.Range("E9").value = "Bokfort dato"
-    ws.Range("F9").value = "Forstegangsregistrert"
-    ws.Range("G9").value = "Naermeste eierskiftedato"
-    ws.Range("H9").value = "Naermeste hendelse"
-    ws.Range("I9").value = "Dager avvik"
-    ws.Range("J9").value = "Kontrollert"
-    ws.Range("K9").value = "Selger ved eierskifte"
-    ws.Range("L9").value = "Kjoper ved eierskifte"
-    ws.Range("M9").value = "Status eierskifte"
+    ws.Range("E5:F5").Merge
+    ws.Range("E5").value = bilerMed0Dager
 
-    ws.Range("A5").Formula2 = _
-        "=SUMPRODUCT(--(((KjoretoyInput[Regnr]<>"""")+" & _
-        "(KjoretoyInput[VIN]<>""""))>0))"
+    ws.Range("G5").value = dateFrom
+    ws.Range("H5").value = dateTo
+    ws.Range("G5:H5").NumberFormat = "dd.mm.yyyy"
 
-    ws.Range("C5").Formula2 = _
-        "=COUNTIF(INDEX(A10#,0,10),""Ja"")"
+    With ws.Range("A5:H5")
+        .Font.Bold = True
+        .Font.Size = 16
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+    End With
 
-    ws.Range("E5").Formula2 = _
-        "=IFERROR(ROWS(FILTER(INDEX(A10#,0,2)," & _
-        "(INDEX(A10#,0,9)=0)*" & _
-        "(INDEX(A10#,0,10)=""Ja""))),0)"
+    ws.Range("I5").value = "0 dager"
+    ws.Range("J5:K5").Merge : ws.Range("J5").value = "1-15 dager"
+    ws.Range("L5:M5").Merge : ws.Range("L5").value = "Over 15 dager"
 
-    ws.Range("I6").Formula2 = _
-        "=COUNTIFS(INDEX(A10#,0,9),0," & _
-        "INDEX(A10#,0,10),""Ja"")"
+    ws.Range("I6").value = bucket0
+    ws.Range("J6:K6").Merge : ws.Range("J6").value = bucket1til15
+    ws.Range("L6:M6").Merge : ws.Range("L6").value = bucketOver15
 
-    ws.Range("J6").Formula2 = _
-        "=COUNTIFS(INDEX(A10#,0,9),"">=1""," & _
-        "INDEX(A10#,0,9),""<=15""," & _
-        "INDEX(A10#,0,10),""Ja"")"
+    With ws.Range("I5:I6")
+        .Interior.Color = COLOR_GREEN_FILL
+        .Font.Color = COLOR_GREEN_FONT
+    End With
 
-    ws.Range("K6").Formula2 = _
-        "=COUNTIFS(INDEX(A10#,0,9),"">15""," & _
-        "INDEX(A10#,0,10),""Ja"")"
+    With ws.Range("J5:K6")
+        .Interior.Color = COLOR_YELLOW_FILL
+        .Font.Color = COLOR_YELLOW_FONT
+    End With
 
-    ws.Range("A10").Calculate
-    ws.Calculate
+    With ws.Range("L5:M6")
+        .Interior.Color = COLOR_RED_FILL
+        .Font.Color = COLOR_RED_FONT
+    End With
 
-    FormatControlSheet ws, lastRow
+    With ws.Range("I5:M6")
+        .Font.Bold = True
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+    End With
 
-End Sub
+    ws.rows("4:6").RowHeight = 20
 
+    '----------------------------------------------------------
+    ' Kolonneoverskrifter (rad 9)
+    '----------------------------------------------------------
 
-Private Sub FormatControlSheet( _
-    ByVal ws As Worksheet, _
-    ByVal lastRow As Long)
+    ws.Range("A" & HEADER_ROW).value = "API-treff"
+    ws.Range("B" & HEADER_ROW).value = "Regnr / input"
+    ws.Range("C" & HEADER_ROW).value = "Chassisnummer"
+    ws.Range("D" & HEADER_ROW).value = "Modell"
+    ws.Range("E" & HEADER_ROW).value = "Bokfort dato"
+    ws.Range("F" & HEADER_ROW).value = "Forstegangsregistrert"
+    ws.Range("G" & HEADER_ROW).value = "Naermeste eierskiftedato"
+    ws.Range("H" & HEADER_ROW).value = "Naermeste hendelse"
+    ws.Range("I" & HEADER_ROW).value = "Dager avvik"
+    ws.Range("J" & HEADER_ROW).value = "Kontrollert"
+    ws.Range("K" & HEADER_ROW).value = "Selger ved eierskifte"
+    ws.Range("L" & HEADER_ROW).value = "Kjoper ved eierskifte"
+    ws.Range("M" & HEADER_ROW).value = "Status eierskifte"
 
-    Dim dataRange As Range
-    Dim fullRange As Range
-
-    Set dataRange = ws.Range("A10:M" & lastRow)
-    Set fullRange = ws.Range("A9:M" & lastRow)
-
-    With ws.Range("A9:M9")
+    With ws.Range("A" & HEADER_ROW & ":M" & HEADER_ROW)
         .Font.Bold = True
         .Font.Color = RGB(255, 255, 255)
         .Interior.Color = RGB(31, 78, 120)
@@ -1300,22 +1428,79 @@ Private Sub FormatControlSheet( _
         .RowHeight = 34
     End With
 
-    With dataRange
+    '----------------------------------------------------------
+    ' En rad per kjoretoy (rad 10 og nedover)
+    '----------------------------------------------------------
+
+    r = FIRST_DATA_ROW
+
+    For Each row In kontrollRows
+
+        ws.Cells(r, 1).value = VariantToString(row("ApiTreff"))
+        ws.Cells(r, 2).value = VariantToString(row("RegnrInput"))
+        ws.Cells(r, 3).value = VariantToString(row("Chassisnummer"))
+        ws.Cells(r, 4).value = VariantToString(row("Modell"))
+        ws.Cells(r, 5).value = row("BokfortDato")
+        ws.Cells(r, 6).value = row("Forstegangsregistrert")
+        ws.Cells(r, 7).value = row("NaermesteEierskiftedato")
+        ws.Cells(r, 8).value = VariantToString(row("NaermesteHendelse"))
+        ws.Cells(r, 9).value = row("DagerAvvik")
+        ws.Cells(r, 10).value = VariantToString(row("Kontrollert"))
+        ws.Cells(r, 11).value = VariantToString(row("Selger"))
+        ws.Cells(r, 12).value = VariantToString(row("Kjoper"))
+        ws.Cells(r, 13).value = VariantToString(row("StatusEierskifte"))
+
+        dagerAvvik = row("DagerAvvik")
+
+        If IsNumeric(dagerAvvik) Then
+
+            If CLng(dagerAvvik) = 0 Then
+                bucketColor = COLOR_GREEN_FILL
+                bucketFontColor = COLOR_GREEN_FONT
+            ElseIf CLng(dagerAvvik) <= 15 Then
+                bucketColor = COLOR_YELLOW_FILL
+                bucketFontColor = COLOR_YELLOW_FONT
+            Else
+                bucketColor = COLOR_RED_FILL
+                bucketFontColor = COLOR_RED_FONT
+            End If
+
+            With ws.Range(ws.Cells(r, 7), ws.Cells(r, 7))
+                .Interior.Color = bucketColor
+                .Font.Color = bucketFontColor
+            End With
+
+            With ws.Range(ws.Cells(r, 9), ws.Cells(r, 9))
+                .Interior.Color = bucketColor
+                .Font.Color = bucketFontColor
+                .Font.Bold = True
+            End With
+
+        End If
+
+        r = r + 1
+
+    Next row
+
+    lastRow = r - 1
+    If lastRow < FIRST_DATA_ROW Then lastRow = FIRST_DATA_ROW
+
+    With ws.Range("A" & FIRST_DATA_ROW & ":M" & lastRow)
         .Font.Size = 10
-        .Font.Color = RGB(31, 31, 31)
         .VerticalAlignment = xlCenter
-        .Interior.Color = RGB(255, 255, 255)
-        .RowHeight = 18
+        .rows.RowHeight = 18
     End With
 
-    With fullRange.Borders
+    ws.Range("E" & FIRST_DATA_ROW & ":G" & lastRow).NumberFormat = _
+        "dd.mm.yyyy"
+
+    ws.Range("I" & FIRST_DATA_ROW & ":I" & lastRow).NumberFormat = "0"
+
+    With ws.Range("A" & HEADER_ROW & ":M" & lastRow).Borders
         .LineStyle = xlContinuous
         .Color = RGB(217, 226, 243)
         .Weight = xlThin
     End With
-
-    ws.Range("E10:G" & lastRow).NumberFormat = "dd.mm.yyyy"
-    ws.Range("I10:I" & lastRow).NumberFormat = "0"
 
     ws.Columns("A").ColumnWidth = 24
     ws.Columns("B").ColumnWidth = 14
@@ -1328,6 +1513,217 @@ Private Sub FormatControlSheet( _
     ws.Columns("M").ColumnWidth = 28
 
 End Sub
+
+
+' Bygger kontroll-raden for ett kjoretoy: sammenligner bokfort dato
+' med forstegangsregistrering og naermeste OFV-eierskifte, og
+' plukker det som ligger naermest som "naermeste hendelse".
+Private Function BuildKontrollRow( _
+    ByVal regNo As String, _
+    ByVal vin As String, _
+    ByVal bokfortRaw As Variant, _
+    ByVal vehicleTxRows As Collection) As Object
+
+    Dim result As Object
+    Dim txRow As Variant
+    Dim bokfortDate As Variant
+
+    Dim firstRegDate As Variant
+    Dim modelName As String
+    Dim chassisNo As String
+    Dim errorStatus As String
+    Dim hasAnyOkRow As Boolean
+
+    Dim nearestTxDate As Variant
+    Dim nearestTxRow As Object
+    Dim thisDiff As Double
+    Dim bestDiff As Double
+
+    Dim diffFirstReg As Variant
+    Dim diffEierskifte As Variant
+
+    Set result = CreateObject("Scripting.Dictionary")
+    result.CompareMode = vbTextCompare
+
+    bokfortDate = Empty
+    If IsDate(bokfortRaw) Then bokfortDate = CDate(bokfortRaw)
+
+    firstRegDate = Empty
+    modelName = vbNullString
+    chassisNo = vin
+    errorStatus = vbNullString
+    hasAnyOkRow = False
+    nearestTxDate = Empty
+    Set nearestTxRow = Nothing
+
+    If Not vehicleTxRows Is Nothing Then
+
+        For Each txRow In vehicleTxRows
+
+            If VariantToString(txRow("Status")) = "OK" Then
+
+                hasAnyOkRow = True
+
+                If IsEmpty(firstRegDate) Then
+                    If IsDate(txRow("FirstRegistrationDate")) Then
+                        firstRegDate = txRow("FirstRegistrationDate")
+                    End If
+                End If
+
+                If Len(modelName) = 0 Then
+                    modelName = VariantToString(txRow("ModelName"))
+                End If
+
+                If Len(VariantToString( _
+                    txRow("ChassisNumber"))) > 0 Then
+
+                    chassisNo = VariantToString( _
+                        txRow("ChassisNumber"))
+
+                End If
+
+                If Not IsEmpty(bokfortDate) And _
+                   IsDate(txRow("TransactionDate")) Then
+
+                    thisDiff = Abs(CDbl( _
+                        CDate(txRow("TransactionDate")) - _
+                        CDate(bokfortDate)))
+
+                    If IsEmpty(nearestTxDate) Then
+
+                        nearestTxDate = txRow("TransactionDate")
+                        Set nearestTxRow = txRow
+
+                    Else
+
+                        bestDiff = Abs(CDbl( _
+                            CDate(nearestTxDate) - _
+                            CDate(bokfortDate)))
+
+                        If thisDiff < bestDiff Then
+                            nearestTxDate = txRow("TransactionDate")
+                            Set nearestTxRow = txRow
+                        End If
+
+                    End If
+
+                End If
+
+            ElseIf Left$(VariantToString(txRow("Status")), 5) = _
+                "Feil:" Then
+
+                If Len(errorStatus) = 0 Then
+                    errorStatus = VariantToString(txRow("Status"))
+                End If
+
+            End If
+
+        Next txRow
+
+    End If
+
+    result("RegnrInput") = regNo
+    result("Chassisnummer") = chassisNo
+    result("Modell") = modelName
+    result("BokfortDato") = bokfortDate
+    result("Forstegangsregistrert") = firstRegDate
+    result("NaermesteEierskiftedato") = nearestTxDate
+    result("NaermesteHendelse") = vbNullString
+    result("DagerAvvik") = Empty
+    result("Selger") = vbNullString
+    result("Kjoper") = vbNullString
+    result("StatusEierskifte") = vbNullString
+
+    diffFirstReg = Empty
+    diffEierskifte = Empty
+
+    If Not IsEmpty(bokfortDate) And Not IsEmpty(firstRegDate) Then
+        diffFirstReg = Abs(CDbl( _
+            CDate(firstRegDate) - CDate(bokfortDate)))
+    End If
+
+    If Not IsEmpty(bokfortDate) And Not IsEmpty(nearestTxDate) Then
+        diffEierskifte = Abs(CDbl( _
+            CDate(nearestTxDate) - CDate(bokfortDate)))
+    End If
+
+    If IsEmpty(bokfortDate) Then
+
+        If hasAnyOkRow Or Not IsEmpty(firstRegDate) Then
+            result("ApiTreff") = "Mangler bokfort dato"
+        ElseIf Len(errorStatus) > 0 Then
+            result("ApiTreff") = errorStatus
+        Else
+            result("ApiTreff") = "Ingen treff"
+        End If
+
+        result("Kontrollert") = "Nei"
+
+    ElseIf IsEmpty(diffFirstReg) And IsEmpty(diffEierskifte) Then
+
+        If Len(errorStatus) > 0 Then
+            result("ApiTreff") = errorStatus
+        Else
+            result("ApiTreff") = "Ingen treff"
+        End If
+
+        result("Kontrollert") = "Nei"
+
+    ElseIf IsEmpty(diffEierskifte) Or _
+        (Not IsEmpty(diffFirstReg) And diffFirstReg <= diffEierskifte) Then
+
+        result("NaermesteHendelse") = "Forstegangsregistrering"
+        result("DagerAvvik") = CLng(diffFirstReg)
+        result("ApiTreff") = "Treff forstegangsregistrering"
+        result("Kontrollert") = "Ja"
+
+    Else
+
+        result("NaermesteHendelse") = "Eierskifte"
+        result("DagerAvvik") = CLng(diffEierskifte)
+        result("ApiTreff") = "Treff OFV eierskifte"
+        result("Kontrollert") = "Ja"
+
+        If Not nearestTxRow Is Nothing Then
+
+            result("Selger") = ComputeOwnerLabel( _
+                VariantToString(nearestTxRow("FromOwnerType")), _
+                VariantToString(nearestTxRow("FromOwnerCompanyName")))
+
+            result("Kjoper") = ComputeOwnerLabel( _
+                VariantToString(nearestTxRow("ToOwnerType")), _
+                VariantToString(nearestTxRow("ToOwnerCompanyName")))
+
+            result("StatusEierskifte") = _
+                VariantToString(nearestTxRow("Status"))
+
+        End If
+
+    End If
+
+    Set BuildKontrollRow = result
+
+End Function
+
+
+' Samme utledning som formlene i Resultat-tabellen
+' (SelgerType/KjoperType): Privat vinner over firmanavn, ellers
+' firmanavn hvis det finnes, ellers den ra eiertype-teksten.
+Private Function ComputeOwnerLabel( _
+    ByVal ownerType As String, _
+    ByVal companyName As String) As String
+
+    If Len(ownerType) = 0 And Len(companyName) = 0 Then
+        ComputeOwnerLabel = vbNullString
+    ElseIf ownerType = "Privat" Then
+        ComputeOwnerLabel = "Privat"
+    ElseIf Len(companyName) > 0 Then
+        ComputeOwnerLabel = companyName
+    Else
+        ComputeOwnerLabel = ownerType
+    End If
+
+End Function
 
 
 '==============================================================
@@ -1481,23 +1877,36 @@ Private Sub EnsureInputTable(ByVal ws As Worksheet)
 
     lastDataRow = Application.Max( _
         ws.Cells(ws.rows.Count, COL_REGNR).End(xlUp).Row, _
-        ws.Cells(ws.rows.Count, COL_VIN).End(xlUp).Row)
+        ws.Cells(ws.rows.Count, COL_VIN).End(xlUp).Row, _
+        ws.Cells(ws.rows.Count, COL_BOKFORT).End(xlUp).Row)
 
     If lastDataRow < FIRST_ROW Then
         lastDataRow = FIRST_ROW
     End If
 
+    ' Bokfort-kolonnen har kanskje ingen overskrift enna (den er ny).
+    If Len(Trim$(CStr( _
+        ws.Cells(headerRow, COL_BOKFORT).value & vbNullString))) = 0 Then
+
+        ws.Cells(headerRow, COL_BOKFORT).value = "Bokfort"
+
+    End If
+
     Set target = ws.Range( _
         ws.Cells(headerRow, COL_REGNR), _
-        ws.Cells(lastDataRow, COL_VIN))
+        ws.Cells(lastDataRow, COL_BOKFORT))
 
     Set lo = ws.ListObjects.Add(xlSrcRange, target, , xlYes)
     lo.Name = INPUT_TABLE
 
     ' Tving eksakte kolonnenavn uansett hva som sto i overskriftscellene,
-    ' slik at KjoretoyInput[Regnr]/[VIN] alltid treffer.
+    ' slik at KjoretoyInput[Regnr]/[VIN]/[Bokfort] alltid treffer.
     lo.ListColumns(1).Name = "Regnr"
     lo.ListColumns(2).Name = "VIN"
+    lo.ListColumns(3).Name = "Bokfort"
+
+    ws.Range(ws.Cells(FIRST_ROW, COL_BOKFORT), _
+        ws.Cells(lastDataRow, COL_BOKFORT)).NumberFormat = "dd.mm.yyyy"
 
 End Sub
 
