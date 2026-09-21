@@ -138,11 +138,17 @@ Public Sub OFV_RefreshInfo()
     stage = "leser API-nokkel"
     API_ShowStatus "Forbereder", stage
 
+    ' Bruker det navngitte omradet OFV_API hvis det finnes i
+    ' arbeidsboken, ellers leses nokkelen direkte fra Input!A1.
     ofvKey = Trim$(CStr( _
-        ThisWorkbook.Names("OFV_API").RefersToRange.value))
+        ReadConfigValue( _
+            ThisWorkbook, "OFV_API", wsInput.Range("A1"))))
 
     If Len(ofvKey) = 0 Then
-        MsgBox "Fant ingen OFV-nokkel i OFV_API.", _
+        MsgBox _
+            "Fant ingen OFV-nokkel. Legg den enten i det " & _
+            "navngitte omradet OFV_API, eller direkte i " & _
+            "celle A1 pa arket " & INPUT_SHEET & ".", _
             vbExclamation, "API-oppdatering"
         GoTo SafeExit
     End If
@@ -150,11 +156,13 @@ Public Sub OFV_RefreshInfo()
     stage = "leser datoperioden"
     API_ShowStatus "Forbereder", stage
 
-    dateFrom = ThisWorkbook.Names( _
-        "OFV_DateFrom").RefersToRange.value
+    ' Samme prinsipp for datoperioden: navngitt omrade hvis det
+    ' finnes, ellers Input!B2 (fra-dato) og Input!B3 (til-dato).
+    dateFrom = ReadConfigValue( _
+        ThisWorkbook, "OFV_DateFrom", wsInput.Range("B2"))
 
-    dateTo = ThisWorkbook.Names( _
-        "OFV_DateTo").RefersToRange.value
+    dateTo = ReadConfigValue( _
+        ThisWorkbook, "OFV_DateTo", wsInput.Range("B3"))
 
     If Not IsDate(dateFrom) Or Not IsDate(dateTo) Then
         MsgBox "Fyll inn gyldige datoer i Input!B2:B3.", _
@@ -1434,6 +1442,42 @@ Private Function GetRequiredSheet( _
     End If
 
     Set GetRequiredSheet = ws
+
+End Function
+
+
+' Leser verdien fra et navngitt omrade hvis det finnes i
+' arbeidsboken, ellers fra en gitt reserveCelle. Brukes til
+' oppsettsverdier (API-nokkel, datoperiode) som enten kan ligge i
+' et navngitt omrade eller direkte i en fast celle - istedenfor at
+' et manglende navngitt omrade gir "Application-defined or
+' object-defined error" (feil 1004).
+Private Function ReadConfigValue( _
+    ByVal wb As Workbook, _
+    ByVal namedRangeName As String, _
+    ByVal fallbackCell As Range) As Variant
+
+    Dim result As Variant
+
+    result = Empty
+
+    On Error Resume Next
+    result = wb.Names(namedRangeName).RefersToRange.value
+    On Error GoTo 0
+
+    If IsEmpty(result) Then
+
+        result = fallbackCell.value
+
+    ElseIf VarType(result) = vbString Then
+
+        If Len(Trim$(CStr(result))) = 0 Then
+            result = fallbackCell.value
+        End If
+
+    End If
+
+    ReadConfigValue = result
 
 End Function
 
