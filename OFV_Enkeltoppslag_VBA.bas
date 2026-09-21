@@ -899,6 +899,12 @@ Private Function WriteVehicleBlock( _
     rowCount = Application.Max(1, n)
     lastRow = startRow + rowCount - 1
 
+    ' Tving tekstformat FOR verdiene skrives inn. Data fra OFV/SVV
+    ' (f.eks. firmanavn) er ekstern, ukontrollert tekst - uten dette
+    ' vil Excel tolke en verdi som starter med f.eks. "=", "+", "-"
+    ' eller "@" som en formel i stedet for ren tekst.
+    ws.Range("B" & startRow & ":N" & lastRow).NumberFormat = "@"
+
     '----------------------------------------------------------
     ' Naaverende registrering (selskap eller privatperson)
     '----------------------------------------------------------
