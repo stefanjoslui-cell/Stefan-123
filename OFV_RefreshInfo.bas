@@ -29,13 +29,29 @@ Option Explicit
 '     "Try it"-konsollen i Azure APIM-portalen (se kommentar ved
 '     konstanten).
 
-#If VBA7 Then
-    Private Declare PtrSafe Sub Sleep Lib "kernel32" _
-        (ByVal dwMilliseconds As LongPtr)
-#Else
-    Private Declare Sub Sleep Lib "kernel32" _
-        (ByVal dwMilliseconds As Long)
-#End If
+' Ren VBA-pause (ingen Win32/kernel32-kall) - Timer er innebygd i
+' Excel/VBA. Samme navn og signatur som den gamle Sleep Lib
+' "kernel32"-erklaeringen, sa alle eksisterende Sleep-kall i filen
+' virker uendret.
+Private Sub Sleep(ByVal milliseconds As Long)
+
+    Dim startTime As Double
+    Dim elapsedMs As Double
+
+    startTime = Timer
+
+    Do
+        DoEvents
+
+        elapsedMs = (Timer - startTime) * 1000
+
+        If elapsedMs < 0 Then
+            elapsedMs = elapsedMs + 86400000  ' midnatt-rullering
+        End If
+
+    Loop Until elapsedMs >= milliseconds
+
+End Sub
 
 '==============================================================
 ' KONFIGURASJON
