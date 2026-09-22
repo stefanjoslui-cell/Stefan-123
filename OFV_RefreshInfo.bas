@@ -35,30 +35,6 @@ Option Explicit
 '     Finnes ikke skjemaet, hoppes popup-en bare over - se
 '     VisFremdriftVindu-kommentaren for oppsett.
 
-' Ren VBA-pause (ingen Win32/kernel32-kall) - Timer er innebygd i
-' Excel/VBA. Samme navn og signatur som den gamle Sleep Lib
-' "kernel32"-erklaeringen, sa alle eksisterende Sleep-kall i filen
-' virker uendret.
-Private Sub Sleep(ByVal milliseconds As Long)
-
-    Dim startTime As Double
-    Dim elapsedMs As Double
-
-    startTime = Timer
-
-    Do
-        DoEvents
-
-        elapsedMs = (Timer - startTime) * 1000
-
-        If elapsedMs < 0 Then
-            elapsedMs = elapsedMs + 86400000  ' midnatt-rullering
-        End If
-
-    Loop Until elapsedMs >= milliseconds
-
-End Sub
-
 '==============================================================
 ' KONFIGURASJON
 '==============================================================
@@ -100,6 +76,38 @@ Private Const COLOR_YELLOW_FILL As Long = 10284031  ' RGB(255,235,156)
 Private Const COLOR_YELLOW_FONT As Long = 26012     ' RGB(156,101,0)
 Private Const COLOR_RED_FILL As Long = 13551615     ' RGB(255,199,206)
 Private Const COLOR_RED_FONT As Long = 393372       ' RGB(156,0,6)
+
+' Instans av UserForm-en "frmFremdrift" (fremdriftsvindu-popup), satt
+' av VisFremdriftVindu. Nothing hvis skjemaet ikke finnes/ikke ble
+' opprettet - resten av koden sjekker alltid for dette, sa fravaer av
+' skjemaet aldri stopper selve API-oppdateringen (kun popup-vinduet
+' uteblir).
+Private gFremdriftForm As Object
+
+
+' Ren VBA-pause (ingen Win32/kernel32-kall) - Timer er innebygd i
+' Excel/VBA. Samme navn og signatur som den gamle Sleep Lib
+' "kernel32"-erklaeringen, sa alle eksisterende Sleep-kall i filen
+' virker uendret.
+Private Sub Sleep(ByVal milliseconds As Long)
+
+    Dim startTime As Double
+    Dim elapsedMs As Double
+
+    startTime = Timer
+
+    Do
+        DoEvents
+
+        elapsedMs = (Timer - startTime) * 1000
+
+        If elapsedMs < 0 Then
+            elapsedMs = elapsedMs + 86400000  ' midnatt-rullering
+        End If
+
+    Loop Until elapsedMs >= milliseconds
+
+End Sub
 
 
 '==============================================================
@@ -687,12 +695,6 @@ End Sub
 '==============================================================
 ' FREMDRIFTSVINDU (popup under kjoring)
 '==============================================================
-
-' Instans av UserForm-en "frmFremdrift", satt av VisFremdriftVindu.
-' Nothing hvis skjemaet ikke finnes/ikke ble opprettet - resten av
-' koden sjekker alltid for dette, sa fravaer av skjemaet aldri
-' stopper selve API-oppdateringen (kun popup-vinduet uteblir).
-Private gFremdriftForm As Object
 
 ' Viser popup-vinduet "frmFremdrift" hvis det finnes i prosjektet
 ' (Insert > UserForm i VBA-editoren, navngitt eksakt "frmFremdrift",
