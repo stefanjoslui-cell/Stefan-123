@@ -657,6 +657,7 @@ Private Sub API_ShowStatus( _
     Optional ByVal totalVehicles As Long = 0)
 
     Dim message As String
+    Dim popupMessage As String
     Dim percentage As Double
 
     message = sourceName & " | " & activity
@@ -680,16 +681,65 @@ Private Sub API_ShowStatus( _
 
     Application.StatusBar = message
 
+    ' Penere, kompakt popup-tekst med en tekstbasert fremdriftslinje -
+    ' egen formatering fra den mer detaljerte statuslinje-teksten over.
+    popupMessage = activity
+
+    If currentVehicle > 0 And totalVehicles > 0 Then
+
+        popupMessage = popupMessage & "  " & _
+            LagFremdriftsbar(percentage) & "  " & _
+            Format$(percentage, "0%") & _
+            "  (" & currentVehicle & "/" & totalVehicles & ")"
+
+    End If
+
+    If Len(identifier) > 0 Then
+        popupMessage = popupMessage & "  " & identifier
+    End If
+
     Select Case sourceName
         Case "OFV"
-            OppdaterFremdriftLinje "lblOFV", "OFV: " & message
+            OppdaterFremdriftLinje "lblOFV", "OFV: " & popupMessage
         Case "SVV"
-            OppdaterFremdriftLinje "lblSVV", "SVV: " & message
+            OppdaterFremdriftLinje "lblSVV", "SVV: " & popupMessage
     End Select
 
     DoEvents
 
 End Sub
+
+
+' Tekstbasert fremdriftslinje av Unicode-blokktegn (fylt/tom), til
+' bruk i popup-vinduet. Ingen ekstra kontroller trengs i UserForm-en -
+' hele "loading bar"-effekten er bare formatert tekst i den samme
+' Label-en som resten av statuslinjen.
+Private Function LagFremdriftsbar( _
+    ByVal andel As Double, _
+    Optional ByVal bredde As Long = 16) As String
+
+    Dim fylte As Long
+    Dim i As Long
+    Dim bar As String
+
+    If andel < 0 Then andel = 0
+    If andel > 1 Then andel = 1
+
+    fylte = CLng(andel * bredde)
+
+    For i = 1 To bredde
+
+        If i <= fylte Then
+            bar = bar & ChrW(9608)  ' full blokk
+        Else
+            bar = bar & ChrW(9617)  ' lys skyggelegging
+        End If
+
+    Next i
+
+    LagFremdriftsbar = bar
+
+End Function
 
 
 '==============================================================
@@ -709,6 +759,14 @@ Private Sub VisFremdriftVindu()
     Set gFremdriftForm = VBA.UserForms.Add("frmFremdrift")
 
     If Not gFremdriftForm Is Nothing Then
+
+        gFremdriftForm.Caption = "Oppdaterer API-data ..."
+
+        gFremdriftForm.Controls("lblOFV").Font.Bold = True
+        gFremdriftForm.Controls("lblOFV").Font.Name = "Consolas"
+
+        gFremdriftForm.Controls("lblSVV").Font.Bold = True
+        gFremdriftForm.Controls("lblSVV").Font.Name = "Consolas"
 
         OppdaterFremdriftLinje "lblOFV", "OFV: Venter ..."
         OppdaterFremdriftLinje "lblSVV", "SVV: Venter ..."
