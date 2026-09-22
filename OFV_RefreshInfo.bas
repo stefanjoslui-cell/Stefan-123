@@ -2057,8 +2057,7 @@ Private Function BuildKontrollRow( _
     Set result = CreateObject("Scripting.Dictionary")
     result.CompareMode = vbTextCompare
 
-    bokfortDate = Empty
-    If IsDate(bokfortRaw) Then bokfortDate = CDate(bokfortRaw)
+    bokfortDate = TolkBokfortDato(bokfortRaw)
 
     firstRegDate = Empty
     modelName = vbNullString
@@ -2583,6 +2582,78 @@ Private Function DateFromISO( _
 
 InvalidDate:
     DateFromISO = Empty
+
+End Function
+
+
+' Tolker Bokfort dato fra Input-arket. Dette er den eneste datoen i
+' hele arket som en bruker skriver inn for hand (alle andre datoer
+' kommer fra OFV/SVV sitt eget ISO-format og tolkes av DateFromISO,
+' som er helt uavhengig av regionsinnstillinger).
+'
+' - Er cellen en ekte Excel-dato (uansett hvilket tallformat den
+'   VISES i - dd.mm.aaaa, mm.dd.aaaa osv. spiller ingen rolle, Excel
+'   lagrer den som et tall), brukes den direkte og uten tvetydighet.
+' - Er cellen tekst, tolkes den EKSPLISITT som dag.maned.ar (norsk
+'   standard), uavhengig av hvilke regionsinnstillinger som star pa
+'   maskinen som kjorer makroen - IKKE via CDate, som ville tolket
+'   teksten ulikt fra pc til pc.
+Private Function TolkBokfortDato( _
+    ByVal raw As Variant) As Variant
+
+    Dim tekst As String
+    Dim deler() As String
+    Dim dag As Long
+    Dim maned As Long
+    Dim ar As Long
+
+    If VarType(raw) = vbDate Then
+        TolkBokfortDato = CDate(raw)
+        Exit Function
+    End If
+
+    tekst = Trim$(CStr(raw & vbNullString))
+
+    If Len(tekst) = 0 Then
+        TolkBokfortDato = Empty
+        Exit Function
+    End If
+
+    tekst = Replace(tekst, "/", ".")
+    tekst = Replace(tekst, "-", ".")
+
+    deler = Split(tekst, ".")
+
+    If UBound(deler) = 2 Then
+
+        If IsNumeric(deler(0)) And IsNumeric(deler(1)) And _
+           IsNumeric(deler(2)) Then
+
+            dag = CLng(deler(0))
+            maned = CLng(deler(1))
+            ar = CLng(deler(2))
+
+            If ar < 100 Then ar = ar + 2000
+
+            If maned >= 1 And maned <= 12 And _
+               dag >= 1 And dag <= 31 And _
+               ar >= 1900 And ar <= 2100 Then
+
+                On Error GoTo UgyldigDato
+                TolkBokfortDato = DateSerial(ar, maned, dag)
+                Exit Function
+
+            End If
+
+        End If
+
+    End If
+
+    TolkBokfortDato = Empty
+    Exit Function
+
+UgyldigDato:
+    TolkBokfortDato = Empty
 
 End Function
 
