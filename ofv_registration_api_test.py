@@ -7,9 +7,13 @@ Sandbox restrictions in effect (server-side, cannot be overridden):
   - Max 2 results per call.
   - Max 10 calls per day.
 
-Usage:
+Usage (enklest):
+    1. Fyll inn REGNR og API_KEY i feltet merket "FYLL INN HER" like under.
+    2. Kjør: python ofv_registration_api_test.py
+
+Usage (alternativt, uten å redigere filen):
     python ofv_registration_api_test.py --regnr AB12345 --api-key <key>
-    python ofv_registration_api_test.py               # prompts interactively
+    python ofv_registration_api_test.py               # spør deg interaktivt
 
 Output:
     An .xlsx workbook with one sheet per data section (Registration, History,
@@ -25,6 +29,14 @@ from pathlib import Path
 
 import requests
 from openpyxl import Workbook
+
+# ============================================================
+#  FYLL INN HER — regnr og API-nøkkel du har fått fra OFV:
+#
+REGNR = ""      # f.eks. "AB12345"
+API_KEY = ""    # din "Ocp-Apim-Subscription-Key"
+#
+# ============================================================
 
 API_URL = "https://api.ofv.no/registrations/v1/"
 DEFAULT_OUTPUT_NAME = "OFV registration API test.xlsx"
@@ -188,8 +200,9 @@ def main():
     parser.add_argument("--output", default=DEFAULT_OUTPUT_NAME, help="Filnavn for Excel-output")
     args = parser.parse_args()
 
-    reg_no = args.regnr or input("Registreringsnummer: ").strip()
-    api_key = args.api_key or getpass.getpass("API-nøkkel (Ocp-Apim-Subscription-Key): ").strip()
+    # Prioritet: kommandolinje-argument > verdi fylt inn i toppen av filen > interaktivt spørsmål
+    reg_no = args.regnr or REGNR or input("Registreringsnummer: ").strip()
+    api_key = args.api_key or API_KEY or getpass.getpass("API-nøkkel (Ocp-Apim-Subscription-Key): ").strip()
 
     if not reg_no or not api_key:
         print("Regnr og API-nøkkel er påkrevd.", file=sys.stderr)
