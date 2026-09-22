@@ -1,29 +1,33 @@
 Option Explicit
 
 ' Produksjonsmakro for prosjektet "Python program for bilregistrering":
-' Input-arket (KjoretoyInput), Resultat-arket (Transaksjoner-tabellen),
-' Oversikt (KPI-er + pivot + regnr/forstegangsreg-liste) og
-' Kontroll solgte biler oppdateres alle fra samme OFV-datahenting.
+' Resultat-arket (Transaksjoner-tabellen), Oversikt (KPI-er + pivot +
+' regnr/forstegangsreg-liste) og Kontroll solgte biler oppdateres alle
+' fra samme datahenting. Input-arket LESES fra, men aldri skrevet til
+' eller ellers endret av denne makroen.
 '
 ' Kort om oppsettet:
-'   - Bruker kun OFV Transactions API. Statens Vegvesen (SVV/"VVS") er
-'     ikke i bruk noe sted i denne filen.
-'   - HTTP-kallene bruker WinHttp.WinHttpRequest.5.1 (samme klient som
-'     testscriptet som lostte lagringsproblemene tidligere).
+'   - Input-arket (ingen tabell kreves, rene celler):
+'       A1  = OFV API-nokkel (eller navngitt omrade OFV_API)
+'       B2  = Statens Vegvesen API-nokkel (eller navngitt omrade SVV_API)
+'       B7 og nedover = Regnr
+'       C7 og nedover = VIN
+'       D7 og nedover = Bokfort dato
+'   - OFV Transactions API er hovedkilden. Hvert regnr/VIN hentes med
+'     ETT kall som gir hele transaksjonshistorikken (ingen datofilter),
+'     sortert nyeste forst.
+'   - Statens Vegvesen (SVV) brukes KUN som reserve: hvis et kjoretoy
+'     ikke har noen transaksjoner i det hele tatt fra OFV, hentes
+'     forstegangsregistreringsdatoen fra SVV i stedet, og den datoen
+'     brukes da ogsa som grunnlag for kontrollen mot bokfort dato.
+'     Mangler SVV-nokkelen, hoppes SVV-oppslaget bare over - det er
+'     ingen kritisk avhengighet.
+'   - HTTP-kallene (bade OFV og SVV) bruker WinHttp.WinHttpRequest.5.1
+'     (samme klient som testscriptet som lostte lagringsproblemene
+'     tidligere).
 '   - OFV_URL = https://api.ofv.no/transactions/v1/, bekreftet via
 '     "Try it"-konsollen i Azure APIM-portalen (se kommentar ved
-'     konstanten). Kallet henter ALLE transaksjoner for hvert regnr/VIN
-'     - uten datofilter - sa firstRegistrationDate garantert finnes sa
-'     lenge OFV har minst en transaksjon noen gang for kjoretoyet.
-'     Fra dato/Til dato (Input!B2:B3) brukes kun til a avgrense hvilken
-'     transaksjon som regnes som "naermeste eierskifte" i Kontroll
-'     solgte biler - Resultat/Transaksjoner-tabellen viser hele
-'     historikken, og kan filtreres pa TransaksjonsDato med det
-'     innebygde Excel-autofilteret.
-'   - KjoretoyInput-tabellen pa Input (bygges automatisk om den
-'     mangler) har na 4 kolonner: Regnr, VIN, Bokfort (dato du fyller
-'     inn manuelt) og Forstegangsregistrering (skrives tilbake av
-'     makroen etter hver kjoring).
+'     konstanten).
 
 #If VBA7 Then
     Private Declare PtrSafe Sub Sleep Lib "kernel32" _
@@ -42,15 +46,13 @@ Private Const RESULT_SHEET As String = "Resultat"
 Private Const OVERVIEW_SHEET As String = "Oversikt"
 Private Const CONTROL_SHEET As String = "Kontroll solgte biler"
 
-Private Const INPUT_TABLE As String = "KjoretoyInput"
 Private Const RESULT_TABLE As String = "Transaksjoner"
 Private Const PIVOT_NAME As String = "TransaksjonsPivot"
 
-Private Const FIRST_ROW As Long = 5
+Private Const FIRST_ROW As Long = 7
 Private Const COL_REGNR As Long = 2
 Private Const COL_VIN As Long = 3
 Private Const COL_BOKFORT As Long = 4
-Private Const COL_FORSTEREG As Long = 5
 
 ' Bekreftet via "Try it"-konsollen i Azure APIM-portalen
 ' (https://data.ofv.no/api-details#api=transactions-api-v1&operation=query-transactions):
@@ -59,6 +61,10 @@ Private Const COL_FORSTEREG As Long = 5
 ' data.ofv.no.
 Private Const OFV_URL As String = _
     "https://api.ofv.no/transactions/v1/"
+
+Private Const SVV_URL As String = _
+    "https://akfell-datautlevering.atlas.vegvesen.no/" & _
+    "enkeltoppslag/kjoretoydata?"
 
 Private Const MAX_RETRIES As Long = 4
 Private Const RETRY_WAIT_MS As Long = 3000
@@ -89,7 +95,8 @@ Public Sub OFV_RefreshInfo()
     Dim queue As Object
     Dim hitVehicles As Object
     Dim vehicleRowsByKey As Object
-    Dim firstRegByKey As Object
+    Dim svvInfoByKey As Object
+    Dim svvInfo As Object
     Dim resultRow As Object
     Dim kontrollRow As Object
 
@@ -104,8 +111,7 @@ Public Sub OFV_RefreshInfo()
     Dim output() As Variant
 
     Dim ofvKey As String
-    Dim dateFrom As Variant
-    Dim dateTo As Variant
+    Dim svvKey As String
     Dim stage As String
 
     Dim lastRegRow As Long
@@ -119,6 +125,9 @@ Public Sub OFV_RefreshInfo()
     Dim transactionCount As Long
     Dim noTransactionCount As Long
     Dim ofvErrorCount As Long
+    Dim svvDateCount As Long
+    Dim svvErrorCount As Long
+    Dim vehicleHasOkRow As Boolean
 
     Dim r As Long
     Dim c As Long
@@ -162,11 +171,6 @@ Public Sub OFV_RefreshInfo()
             "Kontroll solgte biler er beskyttet."
     End If
 
-    stage = "oppretter/kontrollerer KjoretoyInput-tabellen"
-    API_ShowStatus "Forbereder", stage
-
-    EnsureInputTable wsInput
-
     stage = "leser API-nokkel"
     API_ShowStatus "Forbereder", stage
 
@@ -185,28 +189,11 @@ Public Sub OFV_RefreshInfo()
         GoTo SafeExit
     End If
 
-    stage = "leser datoperioden"
-    API_ShowStatus "Forbereder", stage
-
-    ' Samme prinsipp for datoperioden: navngitt omrade hvis det
-    ' finnes, ellers Input!B2 (fra-dato) og Input!B3 (til-dato).
-    dateFrom = ReadConfigValue( _
-        ThisWorkbook, "OFV_DateFrom", wsInput.Range("B2"))
-
-    dateTo = ReadConfigValue( _
-        ThisWorkbook, "OFV_DateTo", wsInput.Range("B3"))
-
-    If Not IsDate(dateFrom) Or Not IsDate(dateTo) Then
-        MsgBox "Fyll inn gyldige datoer i Input!B2:B3.", _
-            vbExclamation, "API-oppdatering"
-        GoTo SafeExit
-    End If
-
-    If CDate(dateFrom) > CDate(dateTo) Then
-        MsgBox "Fra-dato kan ikke vaere senere enn til-dato.", _
-            vbExclamation, "API-oppdatering"
-        GoTo SafeExit
-    End If
+    ' SVV er kun en reserve for forstegangsregistrering nar OFV ikke
+    ' har noen transaksjoner - mangler nokkelen, hoppes SVV bare over.
+    svvKey = Trim$(CStr( _
+        ReadConfigValue( _
+            ThisWorkbook, "SVV_API", wsInput.Range("B2"))))
 
     stage = "leser kjoretoylisten"
     API_ShowStatus "Forbereder", stage
@@ -273,8 +260,8 @@ Public Sub OFV_RefreshInfo()
 
     Set kontrollRows = New Collection
 
-    Set firstRegByKey = CreateObject("Scripting.Dictionary")
-    firstRegByKey.CompareMode = vbTextCompare
+    Set svvInfoByKey = CreateObject("Scripting.Dictionary")
+    svvInfoByKey.CompareMode = vbTextCompare
 
     fieldMap = GetFieldMap()
     fieldCount = UBound(fieldMap) + 1
@@ -320,6 +307,8 @@ Public Sub OFV_RefreshInfo()
             vehicleRowsByKey.Add CStr(key), New Collection
         End If
 
+        vehicleHasOkRow = False
+
         For Each resultRow In vehicleRows
 
             statusText = VariantToString( _
@@ -328,6 +317,7 @@ Public Sub OFV_RefreshInfo()
             If statusText = "OK" Then
 
                 transactionCount = transactionCount + 1
+                vehicleHasOkRow = True
 
                 If Not hitVehicles.Exists(CStr(key)) Then
                     hitVehicles.Add CStr(key), True
@@ -348,6 +338,39 @@ Public Sub OFV_RefreshInfo()
             vehicleRowsByKey(CStr(key)).Add resultRow
 
         Next resultRow
+
+        ' SVV er kun en reserve: bare nar OFV ikke ga noen brukbar
+        ' transaksjon for kjoretoyet, og bare hvis SVV-nokkelen finnes.
+        If Not vehicleHasOkRow And Len(svvKey) > 0 Then
+
+            stage = "henter forstegangsregistrering fra Statens vegvesen"
+
+            API_ShowStatus _
+                "SVV", _
+                "Forstegangsregistrering", _
+                identifier, _
+                currentVehicle, _
+                totalVehicles
+
+            Set svvInfo = FetchVehicleInfoFromSVV(svvKey, regNo, vin)
+            Set svvInfoByKey(CStr(key)) = svvInfo
+
+            If svvInfo.Exists("FirstRegistrationDate") Then
+                If IsDate(svvInfo("FirstRegistrationDate")) Then
+                    svvDateCount = svvDateCount + 1
+                End If
+            End If
+
+            If Left$(VariantToString(svvInfo("Status")), 5) = _
+                "Feil:" Then
+
+                svvErrorCount = svvErrorCount + 1
+
+            End If
+
+            Sleep API_PAUSE_MS
+
+        End If
 
         API_ShowStatus _
             "Fullfort", _
@@ -374,22 +397,22 @@ Public Sub OFV_RefreshInfo()
             Set vehicleTxRows = vehicleRowsByKey(CStr(key))
         End If
 
+        Set svvInfo = Nothing
+
+        If svvInfoByKey.Exists(CStr(key)) Then
+            Set svvInfo = svvInfoByKey(CStr(key))
+        End If
+
         Set kontrollRow = BuildKontrollRow( _
             CStr(vehicleData(0)), _
             CStr(vehicleData(1)), _
             vehicleData(2), _
-            vehicleTxRows)
+            vehicleTxRows, _
+            svvInfo)
 
         kontrollRows.Add kontrollRow
 
-        firstRegByKey(CStr(key)) = kontrollRow("Forstegangsregistrert")
-
     Next key
-
-    stage = "skriver forstegangsregistrering til Input"
-    API_ShowStatus "Excel", stage
-
-    WriteFirstRegistrationToInput wsInput, firstRegByKey
 
     '==========================================================
     ' RESULTAT
@@ -495,7 +518,7 @@ Public Sub OFV_RefreshInfo()
     stage = "oppdaterer Oversikt"
     API_ShowStatus "Excel", "Oppdaterer Oversikt"
 
-    UpdateOverviewKPIs wsOverview
+    UpdateOverviewKPIs wsOverview, totalVehicles
     RebuildOverviewPivot wsOverview, loResult
     WriteFirstRegistrationOverviewList wsOverview, kontrollRows
 
@@ -509,9 +532,7 @@ Public Sub OFV_RefreshInfo()
         "Excel", _
         "Oppdaterer Kontroll solgte biler"
 
-    UpdateControlSheet _
-        wsControl, kontrollRows, totalVehicles, _
-        CDate(dateFrom), CDate(dateTo)
+    UpdateControlSheet wsControl, kontrollRows, totalVehicles
 
     Application.Calculation = oldCalculation
 
@@ -543,8 +564,11 @@ Public Sub OFV_RefreshInfo()
         transactionCount & _
         " OFV-eierskifter funnet." & vbCrLf & _
         noTransactionCount & _
-        " uten OFV-eierskifter i perioden." & vbCrLf & _
-        ofvErrorCount & " OFV-feil.", _
+        " uten OFV-eierskifter." & vbCrLf & _
+        ofvErrorCount & " OFV-feil." & vbCrLf & _
+        svvDateCount & _
+        " forstegangsregistreringer hentet fra SVV (reserve)." & vbCrLf & _
+        svvErrorCount & " SVV-feil.", _
         vbInformation, "API-oppdatering"
 
     Exit Sub
@@ -639,15 +663,179 @@ End Sub
 
 
 '==============================================================
+' STATENS VEGVESEN (reserve for forstegangsregistrering)
+'==============================================================
+
+' Kalles kun nar OFV ikke har noen transaksjoner for kjoretoyet.
+' Prover regnr forst, deretter VIN hvis regnr ikke gir treff.
+Private Function FetchVehicleInfoFromSVV( _
+    ByVal apiKey As String, _
+    ByVal regNo As String, _
+    ByVal vin As String) As Object
+
+    Dim result As Object
+    Dim responseText As String
+    Dim statusText As String
+    Dim isoDate As String
+
+    Set result = CreateObject("Scripting.Dictionary")
+    result.CompareMode = vbTextCompare
+    result("Status") = "Statens vegvesen - ingen dato"
+
+    If Len(regNo) > 0 Then
+
+        responseText = GetSVVResponse( _
+            apiKey, "kjennemerke", regNo, statusText)
+
+    End If
+
+    If Len(responseText) = 0 And Len(vin) > 0 Then
+
+        responseText = GetSVVResponse( _
+            apiKey, "understellsnummer", vin, statusText)
+
+    End If
+
+    If Len(responseText) = 0 Then
+
+        If Len(statusText) > 0 Then
+            result("Status") = statusText
+        End If
+
+        Set FetchVehicleInfoFromSVV = result
+        Exit Function
+
+    End If
+
+    isoDate = VariantToString( _
+        JSON_ExtractValue( _
+            responseText, "registrertForstegangNorgeDato"))
+
+    If Len(isoDate) < 10 Then
+
+        isoDate = VariantToString( _
+            JSON_ExtractValue( _
+                responseText, "registrertForstegangDato"))
+
+    End If
+
+    If Len(isoDate) >= 10 Then
+
+        result("FirstRegistrationDate") = DateFromISO(isoDate)
+        result("Status") = "Statens vegvesen"
+
+    End If
+
+    Set FetchVehicleInfoFromSVV = result
+
+End Function
+
+
+Private Function GetSVVResponse( _
+    ByVal apiKey As String, _
+    ByVal filterName As String, _
+    ByVal identifier As String, _
+    ByRef statusText As String) As String
+
+    Dim http As Object
+    Dim url As String
+    Dim attempt As Long
+    Dim statusCode As Long
+    Dim responseText As String
+    Dim lastError As String
+
+    url = SVV_URL & filterName & "=" & identifier
+    statusText = vbNullString
+
+    For attempt = 1 To MAX_RETRIES
+
+        Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
+
+        statusCode = 0
+        responseText = vbNullString
+
+        On Error Resume Next
+
+        http.SetTimeouts 10000, 10000, 30000, 30000
+
+        http.Open "GET", url, False
+
+        http.SetRequestHeader _
+            "SVV-Authorization", "Apikey " & apiKey
+
+        http.SetRequestHeader "Accept", "application/json"
+
+        http.Send
+
+        statusCode = http.Status
+        responseText = http.ResponseText
+
+        If Err.Number <> 0 Then
+            lastError = Err.Description
+            statusCode = 0
+            Err.Clear
+        End If
+
+        On Error GoTo 0
+
+        Select Case statusCode
+
+            Case 200
+                statusText = "Statens vegvesen"
+                GetSVVResponse = responseText
+                Exit Function
+
+            Case 401
+                statusText = _
+                    "Feil: Vegvesenet 401 - kontroller API-nokkel"
+                Exit Function
+
+            Case 403
+                statusText = _
+                    "Feil: Vegvesenet 403 - tilgang eller kvote"
+                Exit Function
+
+            Case 404
+                statusText = "Statens vegvesen - ingen treff"
+                Exit Function
+
+            Case 429, 500, 502, 503, 504
+
+                lastError = _
+                    CStr(statusCode) & ": " & responseText
+
+                Sleep RETRY_WAIT_MS * attempt
+
+            Case Else
+
+                If statusCode <> 0 Then
+
+                    statusText = _
+                        "Feil: Vegvesenet HTTP " & statusCode
+
+                    Exit Function
+
+                Else
+                    Sleep RETRY_WAIT_MS * attempt
+                End If
+
+        End Select
+
+    Next attempt
+
+    statusText = "Feil: Vegvesenet - " & lastError
+
+End Function
+
+
+'==============================================================
 ' OFV-TRANSAKSJONER
 '==============================================================
 
-' Henter ALLE transaksjoner for kjoretoyet - ikke bare de innenfor
-' Fra dato/Til dato. Dette gir ett kall per kjoretoy (ikke to), og
-' garanterer at firstRegistrationDate blir funnet sa lenge OFV har
-' minst en transaksjon noen gang for kjoretoyet, uavhengig av om den
-' ligger innenfor perioden. Periodeavgrensningen for "naermeste
-' eierskifte" gjores i BuildKontrollRow, og for Transaksjoner-tabellen
+' Henter ALLE transaksjoner for kjoretoyet - ett kall per kjoretoy,
+' uten datofilter, sortert nyeste forst. Garanterer at
+' firstRegistrationDate blir funnet sa lenge OFV har minst en
+' transaksjon noen gang for kjoretoyet. For Transaksjoner-tabellen
 ' kan brukeren selv filtrere pa TransaksjonsDato med det innebygde
 ' Excel-autofilteret.
 Private Function FetchOFVTransactions( _
@@ -1344,9 +1532,7 @@ End Sub
 Private Sub UpdateControlSheet( _
     ByVal ws As Worksheet, _
     ByVal kontrollRows As Collection, _
-    ByVal totalVehicles As Long, _
-    ByVal dateFrom As Date, _
-    ByVal dateTo As Date)
+    ByVal totalVehicles As Long)
 
     Const HEADER_ROW As Long = 12
     Const FIRST_DATA_ROW As Long = 13
@@ -1398,14 +1584,17 @@ Private Sub UpdateControlSheet( _
 
     ws.Range("A3:M3").Merge
     ws.Range("A3").value = _
-        "Forstegangsregistrering pavirker aldri dette valget - den " & _
-        "vises kun som egen, uavhengig opplysning."
+        "Har OFV ingen transaksjoner i det hele tatt for kjoretoyet, " & _
+        "brukes forstegangsregistreringsdato fra Statens vegvesen " & _
+        "(SVV) i stedet - bade som kontrollgrunnlag og i kolonnen " & _
+        "Forstegangsregistrert. Kolonnen Kilde helt til venstre " & _
+        "viser om treffet kommer fra OFV eller SVV."
 
     ws.Range("A4:M4").Merge
     ws.Range("A4").value = _
         "Hver bil har en uthevet hovedrad med full kontrollinfo (den " & _
-        "matchede - siste - transaksjonen), etterfulgt av alle " & _
-        "bilens ovrige eierskifter med kun dato og transaksjonsinfo. " & _
+        "matchede transaksjonen/registreringen), etterfulgt av alle " & _
+        "bilens ovrige OFV-eierskifter med kun dato og transaksjonsinfo. " & _
         "Tabellen er sortert med storst dagers avvik forst."
 
     ws.Range("A2:A4").Font.Italic = True
@@ -1450,8 +1639,6 @@ Private Sub UpdateControlSheet( _
     '----------------------------------------------------------
 
     ws.Range("A6:B6").Merge : ws.Range("A6").value = "Inputbiler"
-    ws.Range("G6").value = "Fra dato"
-    ws.Range("H6").value = "Til dato"
     ws.Range("K6:M6").Merge
     ws.Range("K6").value = "FARGEKODER - DAGER AVVIK"
 
@@ -1465,11 +1652,7 @@ Private Sub UpdateControlSheet( _
     ws.Range("A7:B7").Merge
     ws.Range("A7").value = totalVehicles
 
-    ws.Range("G7").value = dateFrom
-    ws.Range("H7").value = dateTo
-    ws.Range("G7:H7").NumberFormat = "dd.mm.yyyy"
-
-    With ws.Range("A7:H7")
+    With ws.Range("A7:B7")
         .Font.Bold = True
         .Font.Size = 16
         .HorizontalAlignment = xlCenter
@@ -1511,19 +1694,20 @@ Private Sub UpdateControlSheet( _
     ' Kolonneoverskrifter
     '----------------------------------------------------------
 
-    ws.Range("A" & HEADER_ROW).value = "API-treff"
-    ws.Range("B" & HEADER_ROW).value = "Regnr / input"
-    ws.Range("C" & HEADER_ROW).value = "Chassisnummer"
-    ws.Range("D" & HEADER_ROW).value = "Modell"
-    ws.Range("E" & HEADER_ROW).value = "Forstegangsregistrert"
-    ws.Range("F" & HEADER_ROW).value = "Bokfort dato"
-    ws.Range("G" & HEADER_ROW).value = "Transaksjonsdato"
-    ws.Range("H" & HEADER_ROW).value = "RegistreringsType"
-    ws.Range("I" & HEADER_ROW).value = "Dager avvik"
-    ws.Range("J" & HEADER_ROW).value = "Selger"
-    ws.Range("K" & HEADER_ROW).value = "Kjoper"
+    ws.Range("A" & HEADER_ROW).value = "Kilde"
+    ws.Range("B" & HEADER_ROW).value = "API-treff"
+    ws.Range("C" & HEADER_ROW).value = "Regnr / input"
+    ws.Range("D" & HEADER_ROW).value = "Chassisnummer"
+    ws.Range("E" & HEADER_ROW).value = "Modell"
+    ws.Range("F" & HEADER_ROW).value = "Forstegangsregistrert"
+    ws.Range("G" & HEADER_ROW).value = "Bokfort dato"
+    ws.Range("H" & HEADER_ROW).value = "Transaksjonsdato"
+    ws.Range("I" & HEADER_ROW).value = "RegistreringsType"
+    ws.Range("J" & HEADER_ROW).value = "Dager avvik"
+    ws.Range("K" & HEADER_ROW).value = "Selger"
+    ws.Range("L" & HEADER_ROW).value = "Kjoper"
 
-    With ws.Range("A" & HEADER_ROW & ":K" & HEADER_ROW)
+    With ws.Range("A" & HEADER_ROW & ":L" & HEADER_ROW)
         .Font.Bold = True
         .Font.Color = RGB(255, 255, 255)
         .Interior.Color = RGB(31, 78, 120)
@@ -1543,19 +1727,20 @@ Private Sub UpdateControlSheet( _
 
         groupStartRow = r
 
-        ws.Cells(r, 1).value = VariantToString(row("ApiTreff"))
-        ws.Cells(r, 2).value = VariantToString(row("RegnrInput"))
-        ws.Cells(r, 3).value = VariantToString(row("Chassisnummer"))
-        ws.Cells(r, 4).value = VariantToString(row("Modell"))
-        ws.Cells(r, 5).value = row("Forstegangsregistrert")
-        ws.Cells(r, 6).value = row("BokfortDato")
-        ws.Cells(r, 7).value = row("KontrollTransaksjonDato")
-        ws.Cells(r, 8).value = VariantToString(row("RegistreringsType"))
-        ws.Cells(r, 9).value = row("DagerAvvik")
-        ws.Cells(r, 10).value = VariantToString(row("Selger"))
-        ws.Cells(r, 11).value = VariantToString(row("Kjoper"))
+        ws.Cells(r, 1).value = VariantToString(row("Kilde"))
+        ws.Cells(r, 2).value = VariantToString(row("ApiTreff"))
+        ws.Cells(r, 3).value = VariantToString(row("RegnrInput"))
+        ws.Cells(r, 4).value = VariantToString(row("Chassisnummer"))
+        ws.Cells(r, 5).value = VariantToString(row("Modell"))
+        ws.Cells(r, 6).value = row("Forstegangsregistrert")
+        ws.Cells(r, 7).value = row("BokfortDato")
+        ws.Cells(r, 8).value = row("KontrollTransaksjonDato")
+        ws.Cells(r, 9).value = VariantToString(row("RegistreringsType"))
+        ws.Cells(r, 10).value = row("DagerAvvik")
+        ws.Cells(r, 11).value = VariantToString(row("Selger"))
+        ws.Cells(r, 12).value = VariantToString(row("Kjoper"))
 
-        With ws.Range(ws.Cells(r, 1), ws.Cells(r, 11))
+        With ws.Range(ws.Cells(r, 1), ws.Cells(r, 12))
             .Font.Bold = True
             .Interior.Color = RGB(238, 244, 251)
         End With
@@ -1575,12 +1760,12 @@ Private Sub UpdateControlSheet( _
                 bucketFontColor = COLOR_RED_FONT
             End If
 
-            With ws.Range(ws.Cells(r, 7), ws.Cells(r, 7))
+            With ws.Range(ws.Cells(r, 8), ws.Cells(r, 8))
                 .Interior.Color = bucketColor
                 .Font.Color = bucketFontColor
             End With
 
-            With ws.Range(ws.Cells(r, 9), ws.Cells(r, 9))
+            With ws.Range(ws.Cells(r, 10), ws.Cells(r, 10))
                 .Interior.Color = bucketColor
                 .Font.Color = bucketFontColor
                 .Font.Bold = True
@@ -1604,17 +1789,17 @@ Private Sub UpdateControlSheet( _
                 If matchetTx Is Nothing Or _
                    Not txRow Is matchetTx Then
 
-                    ws.Cells(r, 7).value = txRow("TransactionDate")
-                    ws.Cells(r, 8).value = _
+                    ws.Cells(r, 8).value = txRow("TransactionDate")
+                    ws.Cells(r, 9).value = _
                         VariantToString(txRow("RegistrationType"))
-                    ws.Cells(r, 10).value = ComputeOwnerLabel( _
+                    ws.Cells(r, 11).value = ComputeOwnerLabel( _
                         VariantToString(txRow("FromOwnerType")), _
                         VariantToString(txRow("FromOwnerCompanyName")))
-                    ws.Cells(r, 11).value = ComputeOwnerLabel( _
+                    ws.Cells(r, 12).value = ComputeOwnerLabel( _
                         VariantToString(txRow("ToOwnerType")), _
                         VariantToString(txRow("ToOwnerCompanyName")))
 
-                    With ws.Range(ws.Cells(r, 1), ws.Cells(r, 11))
+                    With ws.Range(ws.Cells(r, 1), ws.Cells(r, 12))
                         .Font.Italic = True
                         .Font.Color = RGB(90, 90, 90)
                     End With
@@ -1629,7 +1814,7 @@ Private Sub UpdateControlSheet( _
 
         ' Tykk topplinje over hver ny bil, sa gruppene er lette a se.
         With ws.Range( _
-            ws.Cells(groupStartRow, 1), ws.Cells(groupStartRow, 11)).Borders(xlEdgeTop)
+            ws.Cells(groupStartRow, 1), ws.Cells(groupStartRow, 12)).Borders(xlEdgeTop)
 
             .LineStyle = xlContinuous
             .Color = RGB(31, 78, 120)
@@ -1642,32 +1827,33 @@ Private Sub UpdateControlSheet( _
     lastRow = r - 1
     If lastRow < FIRST_DATA_ROW Then lastRow = FIRST_DATA_ROW
 
-    With ws.Range("A" & FIRST_DATA_ROW & ":K" & lastRow)
+    With ws.Range("A" & FIRST_DATA_ROW & ":L" & lastRow)
         .Font.Size = 10
         .VerticalAlignment = xlCenter
         .rows.RowHeight = 18
     End With
 
-    ws.Range("E" & FIRST_DATA_ROW & ":G" & lastRow).NumberFormat = _
+    ws.Range("F" & FIRST_DATA_ROW & ":H" & lastRow).NumberFormat = _
         "dd.mm.yyyy"
 
-    ws.Range("I" & FIRST_DATA_ROW & ":I" & lastRow).NumberFormat = "0"
+    ws.Range("J" & FIRST_DATA_ROW & ":J" & lastRow).NumberFormat = "0"
 
-    With ws.Range("A" & HEADER_ROW & ":K" & lastRow).Borders
+    With ws.Range("A" & HEADER_ROW & ":L" & lastRow).Borders
         .LineStyle = xlContinuous
         .Color = RGB(217, 226, 243)
         .Weight = xlThin
     End With
 
-    ws.Columns("A").ColumnWidth = 24
-    ws.Columns("B").ColumnWidth = 14
-    ws.Columns("C").ColumnWidth = 22
-    ws.Columns("D").ColumnWidth = 18
-    ws.Columns("E:G").ColumnWidth = 16
-    ws.Columns("H").ColumnWidth = 24
-    ws.Columns("I").ColumnWidth = 12
-    ws.Columns("J:K").ColumnWidth = 25
-    ws.Columns("L:M").ColumnWidth = 14
+    ws.Columns("A").ColumnWidth = 10
+    ws.Columns("B").ColumnWidth = 24
+    ws.Columns("C").ColumnWidth = 14
+    ws.Columns("D").ColumnWidth = 22
+    ws.Columns("E").ColumnWidth = 18
+    ws.Columns("F:H").ColumnWidth = 16
+    ws.Columns("I").ColumnWidth = 24
+    ws.Columns("J").ColumnWidth = 12
+    ws.Columns("K:L").ColumnWidth = 25
+    ws.Columns("M").ColumnWidth = 14
 
 End Sub
 
@@ -1726,19 +1912,23 @@ End Function
 '
 ' Kontrollregel: bokfort dato sjekkes ALLTID mot bilens SISTE
 ' registrerte eierskifte (den nyeste OFV-transaksjonen for kjoretoyet,
-' uansett dato). Forstegangsregistrering pavirker aldri dette valget -
-' den vises kun som egen, uavhengig kolonne.
+' uansett dato). Har OFV ingen transaksjoner i det hele tatt for
+' kjoretoyet (svvInfo er da forventet a vaere fylt ut av den som
+' kaller), brukes forstegangsregistreringsdato fra SVV i stedet - bade
+' som kontrollgrunnlag og i kolonnen Forstegangsregistrert. Kolonnen
+' "Kilde" viser om treffet endte opp som OFV, SVV eller Ingen.
 '
-' Alle bilens eierskifter samles ogsa i "AlleTransaksjoner" (sortert
-' pa dato), slik at UpdateControlSheet kan vise dem som egne rader
-' under kjoretoyets hovedrad. Den valgte (siste) transaksjonen merkes
+' Alle bilens OFV-eierskifter samles ogsa i "AlleTransaksjoner"
+' (sortert pa dato), slik at UpdateControlSheet kan vise dem som egne
+' rader under kjoretoyets hovedrad. Den valgte transaksjonen merkes
 ' med ErKontrollMatch=True direkte pa det delte JSON-objektet, slik at
 ' Resultat-arket kan kjenne igjen og utheve akkurat den samme raden.
 Private Function BuildKontrollRow( _
     ByVal regNo As String, _
     ByVal vin As String, _
     ByVal bokfortRaw As Variant, _
-    ByVal vehicleTxRows As Collection) As Object
+    ByVal vehicleTxRows As Collection, _
+    ByVal svvInfo As Object) As Object
 
     Dim result As Object
     Dim txRow As Variant
@@ -1841,11 +2031,30 @@ Private Function BuildKontrollRow( _
     result("DagerAvvik") = Empty
     result("Selger") = vbNullString
     result("Kjoper") = vbNullString
+    result("Kilde") = "Ingen"
     Set result("MatchetTransaksjon") = Nothing
+
+    ' Reserve: OFV har ingen transaksjon i det hele tatt for
+    ' kjoretoyet - bruk forstegangsregistreringsdato fra SVV, bade
+    ' som visningsverdi og som grunnlag for kontrollen.
+    If Not hasAnyOkRow And Not svvInfo Is Nothing Then
+
+        If svvInfo.Exists("FirstRegistrationDate") Then
+
+            If IsDate(svvInfo("FirstRegistrationDate")) Then
+
+                firstRegDate = svvInfo("FirstRegistrationDate")
+                result("Forstegangsregistrert") = firstRegDate
+
+            End If
+
+        End If
+
+    End If
 
     If IsEmpty(bokfortDate) Then
 
-        If hasAnyOkRow Then
+        If hasAnyOkRow Or Not IsEmpty(firstRegDate) Then
             result("ApiTreff") = "Mangler bokfort dato"
         ElseIf Len(errorStatus) > 0 Then
             result("ApiTreff") = errorStatus
@@ -1864,6 +2073,7 @@ Private Function BuildKontrollRow( _
             CDate(sisteTxDato) - CDate(bokfortDate)))
         result("ApiTreff") = "Treff OFV eierskifte"
         result("Kontrollert") = "Ja"
+        result("Kilde") = "OFV"
         Set result("MatchetTransaksjon") = sisteTxRow
 
         result("Selger") = ComputeOwnerLabel( _
@@ -1876,12 +2086,30 @@ Private Function BuildKontrollRow( _
 
         sisteTxRow("ErKontrollMatch") = True
 
+    ElseIf Not IsEmpty(firstRegDate) Then
+
+        result("KontrollTransaksjonDato") = firstRegDate
+        result("RegistreringsType") = "Forstegangsregistrering (SVV)"
+        result("DagerAvvik") = Abs(CLng( _
+            CDate(firstRegDate) - CDate(bokfortDate)))
+        result("ApiTreff") = "Treff SVV forstegangsregistrering"
+        result("Kontrollert") = "Ja"
+        result("Kilde") = "SVV"
+
     Else
 
-        If Len(errorStatus) > 0 Then
-            result("ApiTreff") = errorStatus
+        If svvInfo Is Nothing Then
+
+            If Len(errorStatus) > 0 Then
+                result("ApiTreff") = errorStatus
+            Else
+                result("ApiTreff") = "Ingen treff"
+            End If
+
         Else
-            result("ApiTreff") = "Ingen treff"
+
+            result("ApiTreff") = VariantToString(svvInfo("Status"))
+
         End If
 
         result("Kontrollert") = "Nei"
@@ -2002,7 +2230,9 @@ Private Sub WriteFirstRegistrationOverviewList( _
 End Sub
 
 
-Private Sub UpdateOverviewKPIs(ByVal ws As Worksheet)
+Private Sub UpdateOverviewKPIs( _
+    ByVal ws As Worksheet, _
+    ByVal totalVehicles As Long)
 
     ws.Range("A4").value = "Antall kjoretoy"
     ws.Range("C4").value = "OFV-treff (OK)"
@@ -2010,9 +2240,7 @@ Private Sub UpdateOverviewKPIs(ByVal ws As Worksheet)
 
     ws.Range("A4:A4,C4:C4,F4:F4").Font.Bold = True
 
-    ws.Range("A5").Formula = _
-        "=SUMPRODUCT(--(((KjoretoyInput[Regnr]<>"""")+" & _
-        "(KjoretoyInput[VIN]<>""""))>0))"
+    ws.Range("A5").value = totalVehicles
 
     ws.Range("C5").Formula = _
         "=COUNTIF(Transaksjoner[Status],""OK"")"
@@ -2125,121 +2353,6 @@ Private Function GetRequiredSheet( _
 End Function
 
 
-' Oppretter Excel-tabellen KjoretoyInput pa Input-arket hvis den
-' ikke finnes fra for. Resten av koden (og formlene i Oversikt og
-' Kontroll solgte biler) refererer til KjoretoyInput[Regnr] og
-' KjoretoyInput[VIN] som strukturerte referanser - det krever et
-' ekte tabellobjekt, ikke bare rader med tekst. Overskriftsraden
-' forventes rett over FIRST_ROW (dvs. rad 4 nar FIRST_ROW er 5),
-' med Regnr i kolonne B og VIN i kolonne C.
-Private Sub EnsureInputTable(ByVal ws As Worksheet)
-
-    Dim lo As ListObject
-    Dim headerRow As Long
-    Dim lastDataRow As Long
-    Dim target As Range
-
-    On Error Resume Next
-    Set lo = ws.ListObjects(INPUT_TABLE)
-    On Error GoTo 0
-
-    If Not lo Is Nothing Then Exit Sub
-
-    headerRow = FIRST_ROW - 1
-
-    lastDataRow = Application.Max( _
-        ws.Cells(ws.rows.Count, COL_REGNR).End(xlUp).Row, _
-        ws.Cells(ws.rows.Count, COL_VIN).End(xlUp).Row, _
-        ws.Cells(ws.rows.Count, COL_BOKFORT).End(xlUp).Row, _
-        ws.Cells(ws.rows.Count, COL_FORSTEREG).End(xlUp).Row)
-
-    If lastDataRow < FIRST_ROW Then
-        lastDataRow = FIRST_ROW
-    End If
-
-    ' Bokfort- og Forstegangsregistrering-kolonnene har kanskje ingen
-    ' overskrift enna (de er nye).
-    If Len(Trim$(CStr( _
-        ws.Cells(headerRow, COL_BOKFORT).value & vbNullString))) = 0 Then
-
-        ws.Cells(headerRow, COL_BOKFORT).value = "Bokfort"
-
-    End If
-
-    If Len(Trim$(CStr( _
-        ws.Cells(headerRow, COL_FORSTEREG).value & vbNullString))) = 0 Then
-
-        ws.Cells(headerRow, COL_FORSTEREG).value = "Forstegangsregistrering"
-
-    End If
-
-    Set target = ws.Range( _
-        ws.Cells(headerRow, COL_REGNR), _
-        ws.Cells(lastDataRow, COL_FORSTEREG))
-
-    Set lo = ws.ListObjects.Add(xlSrcRange, target, , xlYes)
-    lo.Name = INPUT_TABLE
-
-    ' Tving eksakte kolonnenavn uansett hva som sto i overskriftscellene,
-    ' slik at KjoretoyInput[Regnr]/[VIN]/[Bokfort] alltid treffer.
-    lo.ListColumns(1).Name = "Regnr"
-    lo.ListColumns(2).Name = "VIN"
-    lo.ListColumns(3).Name = "Bokfort"
-    lo.ListColumns(4).Name = "Forstegangsregistrering"
-
-    ws.Range(ws.Cells(FIRST_ROW, COL_BOKFORT), _
-        ws.Cells(lastDataRow, COL_FORSTEREG)).NumberFormat = "dd.mm.yyyy"
-
-End Sub
-
-
-' Skriver forstegangsregistreringsdato tilbake til Input-arket for
-' hvert regnr/VIN som ble kjort, slik at den er synlig direkte pa
-' Input og ikke bare i Resultat/Oversikt/Kontroll solgte biler.
-' firstRegByKey er nokkelet pa samme BuildVehicleKey-format som queue.
-Private Sub WriteFirstRegistrationToInput( _
-    ByVal ws As Worksheet, _
-    ByVal firstRegByKey As Object)
-
-    Dim lastRow As Long
-    Dim r As Long
-    Dim rowRegNo As String
-    Dim rowVin As String
-    Dim rowKey As String
-    Dim regDate As Variant
-
-    lastRow = Application.Max( _
-        ws.Cells(ws.rows.Count, COL_REGNR).End(xlUp).Row, _
-        ws.Cells(ws.rows.Count, COL_VIN).End(xlUp).Row)
-
-    For r = FIRST_ROW To lastRow
-
-        rowRegNo = NormalizeIdentifier(ws.Cells(r, COL_REGNR).value)
-        rowVin = NormalizeIdentifier(ws.Cells(r, COL_VIN).value)
-        rowKey = BuildVehicleKey(rowVin, rowRegNo)
-
-        If Len(rowKey) > 0 Then
-
-            If firstRegByKey.Exists(rowKey) Then
-
-                regDate = firstRegByKey(rowKey)
-
-                If IsDate(regDate) Then
-                    ws.Cells(r, COL_FORSTEREG).value = CDate(regDate)
-                Else
-                    ws.Cells(r, COL_FORSTEREG).ClearContents
-                End If
-
-            End If
-
-        End If
-
-    Next r
-
-    ws.Range(ws.Cells(FIRST_ROW, COL_FORSTEREG), _
-        ws.Cells(lastRow, COL_FORSTEREG)).NumberFormat = "dd.mm.yyyy"
-
-End Sub
 
 
 ' Leser verdien fra et navngitt omrade hvis det finnes i
