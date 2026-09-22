@@ -28,6 +28,12 @@ Option Explicit
 '   - OFV_URL = https://api.ofv.no/transactions/v1/, bekreftet via
 '     "Try it"-konsollen i Azure APIM-portalen (se kommentar ved
 '     konstanten).
+'   - Fremdriftsvindu: hvis en UserForm ved navn "frmFremdrift" finnes
+'     i prosjektet (med Label-kontroller "lblOFV" og "lblSVV"), vises
+'     den som en ikke-blokkerende popup mens makroren kjorer, med en
+'     linje som oppdateres for OFV-fremgang og en for SVV-fremgang.
+'     Finnes ikke skjemaet, hoppes popup-en bare over - se
+'     VisFremdriftVindu-kommentaren for oppsett.
 
 ' Ren VBA-pause (ingen Win32/kernel32-kall) - Timer er innebygd i
 ' Excel/VBA. Samme navn og signatur som den gamle Sleep Lib
@@ -261,6 +267,8 @@ Public Sub OFV_RefreshInfo()
     Application.Calculation = xlCalculationManual
     Application.cursor = xlWait
     applicationChanged = True
+
+    VisFremdriftVindu
 
     Set allRows = New Collection
 
@@ -574,6 +582,8 @@ Public Sub OFV_RefreshInfo()
 
     applicationChanged = False
 
+    SkjulFremdriftVindu
+
     MsgBox _
         "Oppdateringen er ferdig." & vbCrLf & vbCrLf & _
         totalVehicles & " kjoretoy lest." & vbCrLf & _
@@ -592,6 +602,7 @@ Public Sub OFV_RefreshInfo()
 SafeExit:
 
     Application.StatusBar = False
+    SkjulFremdriftVindu
     Exit Sub
 
 FatalError:
@@ -613,6 +624,8 @@ FatalError:
             oldCursor
 
     End If
+
+    SkjulFremdriftVindu
 
     MsgBox _
         "Oppdateringen ble avbrutt." & vbCrLf & vbCrLf & _
@@ -658,7 +671,84 @@ Private Sub API_ShowStatus( _
     End If
 
     Application.StatusBar = message
+
+    Select Case sourceName
+        Case "OFV"
+            OppdaterFremdriftLinje "lblOFV", "OFV: " & message
+        Case "SVV"
+            OppdaterFremdriftLinje "lblSVV", "SVV: " & message
+    End Select
+
     DoEvents
+
+End Sub
+
+
+'==============================================================
+' FREMDRIFTSVINDU (popup under kjoring)
+'==============================================================
+
+' Instans av UserForm-en "frmFremdrift", satt av VisFremdriftVindu.
+' Nothing hvis skjemaet ikke finnes/ikke ble opprettet - resten av
+' koden sjekker alltid for dette, sa fravaer av skjemaet aldri
+' stopper selve API-oppdateringen (kun popup-vinduet uteblir).
+Private gFremdriftForm As Object
+
+' Viser popup-vinduet "frmFremdrift" hvis det finnes i prosjektet
+' (Insert > UserForm i VBA-editoren, navngitt eksakt "frmFremdrift",
+' med to Label-kontroller navngitt "lblOFV" og "lblSVV"). Sent-bundet
+' (VBA.UserForms.Add med et navn som streng) slik at hele filen
+' fortsatt kompilerer selv om skjemaet ikke er opprettet enna.
+Private Sub VisFremdriftVindu()
+
+    On Error Resume Next
+
+    Set gFremdriftForm = Nothing
+    Set gFremdriftForm = VBA.UserForms.Add("frmFremdrift")
+
+    If Not gFremdriftForm Is Nothing Then
+
+        OppdaterFremdriftLinje "lblOFV", "OFV: Venter ..."
+        OppdaterFremdriftLinje "lblSVV", "SVV: Venter ..."
+
+        gFremdriftForm.Show vbModeless
+
+    End If
+
+    On Error GoTo 0
+
+End Sub
+
+
+' Setter Caption pa en navngitt kontroll i fremdriftsvinduet, hvis
+' vinduet er apent og kontrollen finnes. Feil her (f.eks. feil
+' kontrollnavn) svelges bevisst - popup-teksten er kun kosmetisk.
+Private Sub OppdaterFremdriftLinje( _
+    ByVal kontrollNavn As String, _
+    ByVal tekst As String)
+
+    If gFremdriftForm Is Nothing Then Exit Sub
+
+    On Error Resume Next
+    gFremdriftForm.Controls(kontrollNavn).Caption = tekst
+    On Error GoTo 0
+
+    DoEvents
+
+End Sub
+
+
+' Lukker popup-vinduet. Trygg a kalle selv om det aldri ble apnet.
+Private Sub SkjulFremdriftVindu()
+
+    On Error Resume Next
+
+    If Not gFremdriftForm Is Nothing Then
+        Unload gFremdriftForm
+        Set gFremdriftForm = Nothing
+    End If
+
+    On Error GoTo 0
 
 End Sub
 
