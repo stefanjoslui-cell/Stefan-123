@@ -8,7 +8,7 @@ Option Explicit
 '
 ' Kort om oppsettet:
 '   - Input-arket (ingen tabell kreves, rene celler):
-'       A1  = OFV API-nokkel (eller navngitt omrade OFV_API)
+'       B1  = OFV API-nokkel (eller navngitt omrade OFV_API)
 '       B2  = Statens Vegvesen API-nokkel (eller navngitt omrade SVV_API)
 '       B7 og nedover = Regnr
 '       C7 og nedover = VIN
@@ -205,16 +205,16 @@ Public Sub OFV_RefreshInfo()
     API_ShowStatus "Forbereder", stage
 
     ' Bruker det navngitte omradet OFV_API hvis det finnes i
-    ' arbeidsboken, ellers leses nokkelen direkte fra Input!A1.
+    ' arbeidsboken, ellers leses nokkelen direkte fra Input!B1.
     ofvKey = Trim$(CStr( _
         ReadConfigValue( _
-            ThisWorkbook, "OFV_API", wsInput.Range("A1"))))
+            ThisWorkbook, "OFV_API", wsInput.Range("B1"))))
 
     If Len(ofvKey) = 0 Then
         MsgBox _
             "Fant ingen OFV-nokkel. Legg den enten i det " & _
             "navngitte omradet OFV_API, eller direkte i " & _
-            "celle A1 pa arket " & INPUT_SHEET & ".", _
+            "celle B1 pa arket " & INPUT_SHEET & ".", _
             vbExclamation, "API-oppdatering"
         GoTo SafeExit
     End If
