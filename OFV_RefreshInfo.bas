@@ -3615,11 +3615,10 @@ End Sub
 '==============================================================
 
 ' Bygger hele arket pa nytt hver kjoring - tittel, forklaring av
-' kontrollregelen, KPI-bokser, fargekodelegende, og en hovedrad per
-' kjoretoy (sortert etter storst dagers avvik forst) etterfulgt av en
-' kompakt detaljrad per ovrig eierskifte. Ingen levende Excel-formler
-' her lenger: alt regnes ut i VBA og skrives som faste verdier,
-' akkurat som Resultat og Oversikt for ovrig.
+' kontrollregelen, KPI-bokser, fargekodelegende, og EN rad per kjoretoy
+' (sortert etter storst dagers avvik forst) med kun den matchede
+' transaksjonen - full historikk ligger i Resultat-arket. Ingen levende
+' Excel-formler her: alt regnes ut i VBA og skrives som faste verdier.
 Private Sub UpdateControlSheet( _
     ByVal ws As Worksheet, _
     ByVal kontrollRows As Collection, _
@@ -3629,12 +3628,9 @@ Private Sub UpdateControlSheet( _
     Const FIRST_DATA_ROW As Long = 13
 
     Dim row As Object
-    Dim txRow As Variant
-    Dim alleTx As Collection
     Dim sortertRader As Collection
     Dim r As Long
     Dim lastRow As Long
-    Dim groupStartRow As Long
 
     Dim bucket0 As Long
     Dim bucket1til15 As Long
@@ -3644,7 +3640,6 @@ Private Sub UpdateControlSheet( _
     Dim dagerAvvik As Variant
     Dim bucketColor As Long
     Dim bucketFontColor As Long
-    Dim matchetTx As Object
 
     ws.Cells.Clear
 
@@ -3687,10 +3682,10 @@ Private Sub UpdateControlSheet( _
 
     ws.Range("A4:M4").Merge
     ws.Range("A4").value = _
-        "Hver bil har en uthevet hovedrad med full kontrollinfo (den " & _
-        "matchede transaksjonen/registreringen), etterfulgt av alle " & _
-        "bilens ovrige OFV-eierskifter med kun dato og transaksjonsinfo. " & _
-        "Tabellen er sortert med storst dagers avvik forst."
+        "Hver bil har kun EN rad her, med den matchede " & _
+        "transaksjonen/registreringen. Full transaksjonshistorikk for " & _
+        "hver bil ligger i arket Resultat. Tabellen er sortert med " & _
+        "storst dagers avvik forst."
 
     ws.Range("A2:A4").Font.Italic = True
     ws.rows("2:4").RowHeight = 15
@@ -3816,14 +3811,13 @@ Private Sub UpdateControlSheet( _
     End With
 
     '----------------------------------------------------------
-    ' Hovedrad per kjoretoy + detaljrad per ovrig eierskifte
+    ' En rad per kjoretoy - kun den matchede transaksjonen. Full
+    ' historikk ligger i Resultat-arket.
     '----------------------------------------------------------
 
     r = FIRST_DATA_ROW
 
     For Each row In sortertRader
-
-        groupStartRow = r
 
         ws.Cells(r, 1).value = VariantToString(row("Kilde"))
         ws.Cells(r, 2).value = VariantToString(row("ApiTreff"))
@@ -3890,53 +3884,6 @@ Private Sub UpdateControlSheet( _
         End If
 
         r = r + 1
-
-        ' Detaljrader: alle ovrige eierskifter for samme bil, kun
-        ' transaksjonsdato og transaksjonsinfo (den matchede
-        ' transaksjonen er allerede vist i full i hovedraden over).
-        Set alleTx = row("AlleTransaksjoner")
-
-        If Not alleTx Is Nothing Then
-
-            Set matchetTx = row("MatchetTransaksjon")
-
-            For Each txRow In alleTx
-
-                If matchetTx Is Nothing Or _
-                   Not txRow Is matchetTx Then
-
-                    ws.Cells(r, 8).value = txRow("TransactionDate")
-                    ws.Cells(r, 9).value = _
-                        VariantToString(txRow("RegistrationType"))
-                    ws.Cells(r, 11).value = ComputeOwnerLabel( _
-                        VariantToString(txRow("FromOwnerType")), _
-                        VariantToString(txRow("FromOwnerCompanyName")))
-                    ws.Cells(r, 12).value = ComputeOwnerLabel( _
-                        VariantToString(txRow("ToOwnerType")), _
-                        VariantToString(txRow("ToOwnerCompanyName")))
-
-                    With ws.Range(ws.Cells(r, 1), ws.Cells(r, 13))
-                        .Font.Italic = True
-                        .Font.Color = RGB(90, 90, 90)
-                    End With
-
-                    r = r + 1
-
-                End If
-
-            Next txRow
-
-        End If
-
-        ' Tykk topplinje over hver ny bil, sa gruppene er lette a se.
-        With ws.Range( _
-            ws.Cells(groupStartRow, 1), ws.Cells(groupStartRow, 13)).Borders(xlEdgeTop)
-
-            .LineStyle = xlContinuous
-            .Color = RGB(31, 78, 120)
-            .Weight = xlMedium
-
-        End With
 
     Next row
 
@@ -4024,24 +3971,14 @@ Private Function AvvikSorteringsverdi(ByVal dagerAvvik As Variant) As Double
 End Function
 
 
-' Bygger kontroll-raden for ett kjoretoy.
-'
-' Kontrollregel: bokfort dato sjekkes ALLTID mot bilens SISTE
-' registrerte eierskifte (den nyeste OFV-transaksjonen for kjoretoyet,
-' uansett dato). Har OFV ingen transaksjoner i det hele tatt for
-' kjoretoyet (svvInfo er da forventet a vaere fylt ut av den som
-' kaller), brukes forstegangsregistreringsdato fra SVV i stedet - bade
-' som kontrollgrunnlag og i kolonnen Forstegangsregistrert. Kolonnen
+' Bygger kontroll-raden for ett kjoretoy - kun EN rad per bil, med den
+' transaksjonen som ligger NAERMEST bokfort dato i hele bilens OFV-
+' transaksjonshistorikk (nyeste og eldste, ikke bare siste registrerte).
+' Full historikk for bilen vises ikke her, men i Resultat-arket. Har
+' OFV ingen transaksjoner i det hele tatt, brukes
+' forstegangsregistreringsdato fra SVV i stedet - bade som
+' kontrollgrunnlag og i kolonnen Forstegangsregistrert. Kolonnen
 ' "Kilde" viser om treffet endte opp som OFV, SVV eller Ingen.
-'
-' Alle bilens OFV-eierskifter samles ogsa i "AlleTransaksjoner"
-' (sortert pa dato), slik at UpdateControlSheet kan vise dem som egne
-' rader under kjoretoyets hovedrad. Den valgte transaksjonen merkes
-' med ErKontrollMatch=True direkte pa det delte JSON-objektet, slik at
-' Resultat-arket kan kjenne igjen og utheve akkurat den samme raden.
-' bokfortDate mot HELE bilens OFV-transaksjonshistorikk (nyeste og
-' eldste, ikke bare siste registrerte). Har OFV ingen transaksjoner i
-' det hele tatt, brukes forstegangsregistreringsdato fra SVV i stedet.
 '
 ' Valgfri tilleggskontroll (kun nar selgerOrgNo er fylt ut): den
 ' matchede transaksjonen skal vaere et salg FRA selgerOrgNo. Er OGSA
@@ -4071,9 +4008,6 @@ Private Function BuildKontrollRow( _
     Dim naermesteDiff As Double
     Dim diffDager As Double
 
-    Dim alleTransaksjoner As Collection
-    Dim sortertListe As Collection
-
     Dim selgerOrgNormalisert As String
     Dim fraOrgNr As String
     Dim tilOrgNr As String
@@ -4096,8 +4030,6 @@ Private Function BuildKontrollRow( _
 
     selgerOrgNormalisert = NormalizeIdentifier(selgerOrgNo)
 
-    Set alleTransaksjoner = New Collection
-
     If Not vehicleTxRows Is Nothing Then
 
         For Each txRow In vehicleTxRows
@@ -4105,7 +4037,6 @@ Private Function BuildKontrollRow( _
             If VariantToString(txRow("Status")) = "OK" Then
 
                 hasAnyOkRow = True
-                alleTransaksjoner.Add txRow
 
                 If IsEmpty(firstRegDate) Then
                     If IsDate(txRow("FirstRegistrationDate")) Then
@@ -4173,7 +4104,6 @@ Private Function BuildKontrollRow( _
     result("Kjoper") = vbNullString
     result("Kilde") = "Ingen"
     result("Selvhandel") = vbNullString
-    Set result("MatchetTransaksjon") = Nothing
 
     ' Reserve: OFV har ingen transaksjon i det hele tatt for
     ' kjoretoyet - bruk forstegangsregistreringsdato fra SVV, bade
@@ -4215,7 +4145,6 @@ Private Function BuildKontrollRow( _
         result("ApiTreff") = "Treff OFV eierskifte"
         result("Kontrollert") = "Ja"
         result("Kilde") = "OFV"
-        Set result("MatchetTransaksjon") = naermesteTxRow
 
         result("Selger") = ComputeOwnerLabel( _
             VariantToString(naermesteTxRow("FromOwnerType")), _
@@ -4243,8 +4172,6 @@ Private Function BuildKontrollRow( _
             End If
 
         End If
-
-        naermesteTxRow("ErKontrollMatch") = True
 
     ElseIf Not IsEmpty(firstRegDate) Then
 
@@ -4276,48 +4203,7 @@ Private Function BuildKontrollRow( _
 
     End If
 
-    ' Alle bilens eierskifter, sortert synkende (nyeste forst),
-    ' til bruk for detaljradene i Kontroll solgte biler.
-    Set sortertListe = SorterTransaksjonerPaDato(alleTransaksjoner)
-    Set result("AlleTransaksjoner") = sortertListe
-
     Set BuildKontrollRow = result
-
-End Function
-
-
-' Enkel innsettingssortering (fa elementer per bil, ytelse er ikke
-' et tema) - synkende pa TransactionDate (nyeste forst).
-Private Function SorterTransaksjonerPaDato( _
-    ByVal txRows As Collection) As Collection
-
-    Dim sortert As New Collection
-    Dim txRow As Variant
-    Dim i As Long
-    Dim inserted As Boolean
-
-    For Each txRow In txRows
-
-        inserted = False
-
-        For i = 1 To sortert.Count
-
-            If CDate(txRow("TransactionDate")) > _
-                CDate(sortert(i)("TransactionDate")) Then
-
-                sortert.Add txRow, Before:=i
-                inserted = True
-                Exit For
-
-            End If
-
-        Next i
-
-        If Not inserted Then sortert.Add txRow
-
-    Next txRow
-
-    Set SorterTransaksjonerPaDato = sortert
 
 End Function
 
