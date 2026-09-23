@@ -11,12 +11,12 @@ Option Explicit
 '   - B1 = OFV API-nokkel (eller navngitt omrade OFV_API)
 '   - B2 = Statens Vegvesen API-nokkel (eller navngitt omrade SVV_API)
 '
-'   Kontroll 1 - "Kontroll solgte biler" (kolonne A-C):
+'   Kontroll 1 - "Kontroll solgte biler" (kolonne A-D):
 '     B8         = Juridisk enhet (Selger) - organisasjonsnummer
 '     A12 og ned = Regnr, B12 og ned = VIN (kun en av de to fylles ut
 '                  per rad - koden kjenner dem automatisk fra
 '                  hverandre pa lengde, se ErVIN)
-'     C12 og ned = Bokfort dato
+'     D12 og ned = Bokfort dato
 '
 '   Kontroll 2 - "Varekjop bruktbil" (kolonne F-H):
 '     G8         = Juridisk enhet (Org Nr) - kjoper, organisasjonsnummer
@@ -64,7 +64,7 @@ Private Const ORG_CELL_1 As String = "B8"
 Private Const FIRST_ROW_1 As Long = 12
 Private Const COL_REGNR_1 As Long = 1   ' A
 Private Const COL_VIN_1 As Long = 2     ' B
-Private Const COL_BOKFORT_1 As Long = 3 ' C
+Private Const COL_BOKFORT_1 As Long = 4 ' D
 
 ' --- Kontroll 2: Varekjop bruktbil ---
 Private Const RESULT_SHEET_2 As String = "Resultat Varekjop"
