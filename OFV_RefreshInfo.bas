@@ -135,6 +135,12 @@ Private Const REGTYPE_IKKE_BESTAND As String = _
 ' uteblir).
 Private gFremdriftForm As Object
 
+' Satt av knappene i UserForm-en "frmVelgKontroll" (velg-kontroll-
+' vinduet), lest av OFV_RefreshInfo etter at vinduet lukkes. Ma vaere
+' Public siden frmVelgKontroll sin kode (i et eget skjema-modul)
+' skriver til den. "" = avbrutt/lukket uten valg.
+Public gValgKontroll As String
+
 
 ' Ren VBA-pause (ingen Win32/kernel32-kall) - Timer er innebygd i
 ' Excel/VBA. Samme navn og signatur som den gamle Sleep Lib
@@ -165,21 +171,43 @@ End Sub
 ' HOVEDMAKRO
 '==============================================================
 
-' Knappen "Oppdater" er koblet til denne. Sporr hvilken av de tre
-' kontrollene som skal kjores (eller alle tre) og kaller riktig
-' delmakro(er) - se KjorKontrollSolgteBiler / KjorVarekjopBruktbil /
-' KjorKontrollDemobil lenger ned.
+' Knappen "Oppdater" er koblet til denne. Apner et lite valgvindu
+' (UserForm-en "frmVelgKontroll", hvis den er bygget - se
+' fremgangsmate i chatten) der du klikker hvilken kontroll som skal
+' kjores. Er ikke skjemaet bygget enna, faller den tilbake til en
+' enkel InputBox med samme valg, sa knappen alltid virker.
 Public Sub OFV_RefreshInfo()
 
     Dim valg As String
+    Dim velgForm As Object
 
-    valg = Trim$(InputBox( _
-        "Hvilken kontroll vil du kjore?" & vbCrLf & vbCrLf & _
-        "1 = Kontroll solgte biler" & vbCrLf & _
-        "2 = Varekjop bruktbil" & vbCrLf & _
-        "3 = Kontroll Demobil" & vbCrLf & _
-        "4 = Alle tre", _
-        "Velg kontroll", "4"))
+    gValgKontroll = vbNullString
+
+    On Error Resume Next
+    Set velgForm = VBA.UserForms.Add("frmVelgKontroll")
+    On Error GoTo 0
+
+    If Not velgForm Is Nothing Then
+
+        velgForm.Show vbModal
+
+        valg = gValgKontroll
+
+        On Error Resume Next
+        Unload velgForm
+        On Error GoTo 0
+
+    Else
+
+        valg = Trim$(InputBox( _
+            "Hvilken kontroll vil du kjore?" & vbCrLf & vbCrLf & _
+            "1 = Kontroll solgte biler" & vbCrLf & _
+            "2 = Varekjop bruktbil" & vbCrLf & _
+            "3 = Kontroll Demobil" & vbCrLf & _
+            "4 = Alle tre", _
+            "Velg kontroll", "4"))
+
+    End If
 
     Select Case valg
 
