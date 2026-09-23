@@ -210,6 +210,23 @@ Public Sub OFV_RefreshInfo()
 End Sub
 
 
+' Tre egne makroer til bruk hvis du heller vil ha en knapp per
+' kontroll (i stedet for/i tillegg til InputBox-valget i
+' OFV_RefreshInfo over). Koble hver av disse til sin egen knapp i
+' Excel - se fremgangsmate i chatten.
+Public Sub Knapp_KontrollSolgteBiler()
+    KjorKontrollSolgteBiler
+End Sub
+
+Public Sub Knapp_VarekjopBruktbil()
+    KjorVarekjopBruktbil
+End Sub
+
+Public Sub Knapp_KontrollDemobil()
+    KjorKontrollDemobil
+End Sub
+
+
 '==============================================================
 ' KONTROLL 1: KONTROLL SOLGTE BILER
 '==============================================================
