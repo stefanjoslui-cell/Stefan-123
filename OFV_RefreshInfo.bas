@@ -10,8 +10,10 @@ Option Explicit
 '   - Input-arket (ingen tabell kreves, rene celler):
 '       B1  = OFV API-nokkel (eller navngitt omrade OFV_API)
 '       B2  = Statens Vegvesen API-nokkel (eller navngitt omrade SVV_API)
-'       B7 og nedover = Regnr
-'       C7 og nedover = VIN
+'       B7 og nedover = Regnr ELLER VIN i samme kolonne - koden
+'                       kjenner dem automatisk fra hverandre pa
+'                       lengde (VIN er alltid noyaktig 17 tegn per
+'                       ISO 3779, regnr er alt annet - se ErVIN).
 '       D7 og nedover = Bokfort dato
 '   - OFV Transactions API er hovedkilden. Hvert regnr/VIN hentes med
 '     ETT kall som gir hele transaksjonshistorikken (ingen datofilter),
@@ -48,8 +50,7 @@ Private Const RESULT_TABLE As String = "Transaksjoner"
 Private Const PIVOT_NAME As String = "TransaksjonsPivot"
 
 Private Const FIRST_ROW As Long = 7
-Private Const COL_REGNR As Long = 2
-Private Const COL_VIN As Long = 3
+Private Const COL_IDENTIFIER As Long = 2
 Private Const COL_BOKFORT As Long = 4
 
 ' Bekreftet via "Try it"-konsollen i Azure APIM-portalen
@@ -144,8 +145,6 @@ Public Sub OFV_RefreshInfo()
     Dim svvKey As String
     Dim stage As String
 
-    Dim lastRegRow As Long
-    Dim lastVinRow As Long
     Dim lastInputRow As Long
     Dim oldLastRow As Long
     Dim newLastRow As Long
@@ -166,6 +165,7 @@ Public Sub OFV_RefreshInfo()
 
     Dim regNo As String
     Dim vin As String
+    Dim inputIdent As String
     Dim queueKey As String
     Dim identifier As String
     Dim dictionaryKey As String
@@ -228,24 +228,29 @@ Public Sub OFV_RefreshInfo()
     stage = "leser kjoretoylisten"
     API_ShowStatus "Forbereder", stage
 
-    lastRegRow = wsInput.Cells( _
-        wsInput.rows.Count, COL_REGNR).End(xlUp).Row
-
-    lastVinRow = wsInput.Cells( _
-        wsInput.rows.Count, COL_VIN).End(xlUp).Row
-
-    lastInputRow = Application.Max(lastRegRow, lastVinRow)
+    lastInputRow = wsInput.Cells( _
+        wsInput.rows.Count, COL_IDENTIFIER).End(xlUp).Row
 
     Set queue = CreateObject("Scripting.Dictionary")
     queue.CompareMode = vbTextCompare
 
     For r = FIRST_ROW To lastInputRow
 
-        regNo = NormalizeIdentifier( _
-            wsInput.Cells(r, COL_REGNR).value)
+        inputIdent = NormalizeIdentifier( _
+            wsInput.Cells(r, COL_IDENTIFIER).value)
 
-        vin = NormalizeIdentifier( _
-            wsInput.Cells(r, COL_VIN).value)
+        regNo = vbNullString
+        vin = vbNullString
+
+        If Len(inputIdent) > 0 Then
+
+            If ErVIN(inputIdent) Then
+                vin = inputIdent
+            Else
+                regNo = inputIdent
+            End If
+
+        End If
 
         bokfortValue = wsInput.Cells(r, COL_BOKFORT).value
 
@@ -1862,7 +1867,7 @@ Private Sub UpdateControlSheet( _
 
     ws.Range("A" & HEADER_ROW).value = "Kilde"
     ws.Range("B" & HEADER_ROW).value = "API-treff"
-    ws.Range("C" & HEADER_ROW).value = "Regnr / input"
+    ws.Range("C" & HEADER_ROW).value = "Regnr"
     ws.Range("D" & HEADER_ROW).value = "Chassisnummer"
     ws.Range("E" & HEADER_ROW).value = "Modell"
     ws.Range("F" & HEADER_ROW).value = "Forstegangsregistrert"
@@ -2103,6 +2108,7 @@ Private Function BuildKontrollRow( _
     Dim firstRegDate As Variant
     Dim modelName As String
     Dim chassisNo As String
+    Dim regNoResolved As String
     Dim errorStatus As String
     Dim hasAnyOkRow As Boolean
 
@@ -2120,6 +2126,7 @@ Private Function BuildKontrollRow( _
     firstRegDate = Empty
     modelName = vbNullString
     chassisNo = vin
+    regNoResolved = regNo
     errorStatus = vbNullString
     hasAnyOkRow = False
 
@@ -2155,6 +2162,10 @@ Private Function BuildKontrollRow( _
 
                 End If
 
+                If Len(VariantToString(txRow("RegNo"))) > 0 Then
+                    regNoResolved = VariantToString(txRow("RegNo"))
+                End If
+
                 If IsDate(txRow("TransactionDate")) Then
 
                     ' Siste registrerte eierskifte totalt.
@@ -2186,7 +2197,7 @@ Private Function BuildKontrollRow( _
 
     End If
 
-    result("RegnrInput") = regNo
+    result("RegnrInput") = regNoResolved
     result("Chassisnummer") = chassisNo
     result("Modell") = modelName
     result("BokfortDato") = bokfortDate
@@ -2367,7 +2378,7 @@ Private Sub WriteFirstRegistrationOverviewList( _
     ws.Range("P" & (START_ROW - 1) & ":Q" & _
         (ws.rows.Count)).ClearContents
 
-    ws.Range(START_COL & (START_ROW - 1)).value = "Regnr / input"
+    ws.Range(START_COL & (START_ROW - 1)).value = "Regnr"
     ws.Range("Q" & (START_ROW - 1)).value = "Forstegangsregistrering"
 
     With ws.Range(START_COL & (START_ROW - 1) & ":Q" & (START_ROW - 1))
@@ -2577,6 +2588,17 @@ Private Function NormalizeIdentifier( _
             CStr(value & vbNullString), _
             " ", vbNullString)))
 
+End Function
+
+
+' Skiller VIN fra regnr i den kombinerte input-kolonnen. VIN
+' (chassisnummer) er alltid noyaktig 17 tegn per ISO 3779 - en fast,
+' internasjonal standard. Norske regnr kan derimot variere i lengde
+' (personlige skilt, eldre formater osv.), sa vi sjekker IKKE et fast
+' bokstav/tall-monster for regnr - alt som ikke er 17 tegn regnes som
+' regnr.
+Private Function ErVIN(ByVal tekst As String) As Boolean
+    ErVIN = (Len(tekst) = 17)
 End Function
 
 
