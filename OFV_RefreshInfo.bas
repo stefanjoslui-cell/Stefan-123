@@ -3677,8 +3677,8 @@ Private Sub UpdateControlSheet( _
         "viser om treffet kommer fra OFV eller SVV. Er Juridisk " & _
         "enhet (Selger) fylt ut i B8, sjekkes det i tillegg om samme " & _
         "selskap star oppfort som bade selger og kjoper i den matchede " & _
-        "transaksjonen (Selvhandel) - da flagges raden rod uansett " & _
-        "dagers avvik."
+        "transaksjonen (selvhandel) - da flagges Dager avvik rod " & _
+        "uansett faktisk dagers avvik."
 
     ws.Range("A4:M4").Merge
     ws.Range("A4").value = _
@@ -3798,9 +3798,8 @@ Private Sub UpdateControlSheet( _
     ws.Range("J" & HEADER_ROW).value = "Dager avvik"
     ws.Range("K" & HEADER_ROW).value = "Selger"
     ws.Range("L" & HEADER_ROW).value = "Kjoper"
-    ws.Range("M" & HEADER_ROW).value = "Selvhandel"
 
-    With ws.Range("A" & HEADER_ROW & ":M" & HEADER_ROW)
+    With ws.Range("A" & HEADER_ROW & ":L" & HEADER_ROW)
         .Font.Bold = True
         .Font.Color = RGB(255, 255, 255)
         .Interior.Color = RGB(31, 78, 120)
@@ -3831,9 +3830,8 @@ Private Sub UpdateControlSheet( _
         ws.Cells(r, 10).value = row("DagerAvvik")
         ws.Cells(r, 11).value = VariantToString(row("Selger"))
         ws.Cells(r, 12).value = VariantToString(row("Kjoper"))
-        ws.Cells(r, 13).value = VariantToString(row("Selvhandel"))
 
-        With ws.Range(ws.Cells(r, 1), ws.Cells(r, 13))
+        With ws.Range(ws.Cells(r, 1), ws.Cells(r, 12))
             .Font.Bold = True
             .Interior.Color = RGB(238, 244, 251)
         End With
@@ -3871,16 +3869,6 @@ Private Sub UpdateControlSheet( _
                 .Font.Bold = True
             End With
 
-            If VariantToString(row("Selvhandel")) = "Ja" Then
-
-                With ws.Range(ws.Cells(r, 13), ws.Cells(r, 13))
-                    .Interior.Color = COLOR_RED_FILL
-                    .Font.Color = COLOR_RED_FONT
-                    .Font.Bold = True
-                End With
-
-            End If
-
         End If
 
         r = r + 1
@@ -3890,7 +3878,7 @@ Private Sub UpdateControlSheet( _
     lastRow = r - 1
     If lastRow < FIRST_DATA_ROW Then lastRow = FIRST_DATA_ROW
 
-    With ws.Range("A" & FIRST_DATA_ROW & ":M" & lastRow)
+    With ws.Range("A" & FIRST_DATA_ROW & ":L" & lastRow)
         .Font.Size = 10
         .VerticalAlignment = xlCenter
         .rows.RowHeight = 18
@@ -3901,7 +3889,7 @@ Private Sub UpdateControlSheet( _
 
     ws.Range("J" & FIRST_DATA_ROW & ":J" & lastRow).NumberFormat = "0"
 
-    With ws.Range("A" & HEADER_ROW & ":M" & lastRow).Borders
+    With ws.Range("A" & HEADER_ROW & ":L" & lastRow).Borders
         .LineStyle = xlContinuous
         .Color = RGB(217, 226, 243)
         .Weight = xlThin
@@ -3916,7 +3904,6 @@ Private Sub UpdateControlSheet( _
     ws.Columns("I").ColumnWidth = 24
     ws.Columns("J").ColumnWidth = 12
     ws.Columns("K:L").ColumnWidth = 25
-    ws.Columns("M").ColumnWidth = 14
 
 End Sub
 
@@ -4360,7 +4347,7 @@ Private Function IsCarLevelField(ByVal fieldKey As String) As Boolean
 
     Select Case fieldKey
 
-        Case "RegNo", "ChassisNumber", "MakeName", "ModelName", _
+        Case "ChassisNumber", "MakeName", "ModelName", _
              "FuelGroup", "IsLeased", "IsUsedImported", _
              "FirstRegistrationDate"
 
