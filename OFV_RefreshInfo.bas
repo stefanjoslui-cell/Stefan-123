@@ -1625,7 +1625,6 @@ Private Sub UpdateVarekjopControlSheet( _
     Const FIRST_DATA_ROW As Long = 10
 
     Dim row As Object
-    Dim item As Variant
     Dim r As Long
     Dim lastRow As Long
     Dim antallOk As Long
@@ -1792,54 +1791,6 @@ Private Sub UpdateVarekjopControlSheet( _
         "dd.mm.yyyy"
     ws.Range("F" & FIRST_DATA_ROW & ":G" & lastRow).NumberFormat = _
         "dd.mm.yyyy"
-
-    ' Ekstra blokk: biler OFV sier er kjopt av selskapet i perioden,
-    ' men som ikke finnes i det hele tatt i bokforingslisten.
-    r = lastRow + 3
-
-    ws.Range("A" & r & ":I" & r).Merge
-    ws.Range("A" & r).value = _
-        "Biler OFV viser kjopt av " & buyerOrgName & _
-        ", men som mangler i bokforingslisten"
-
-    With ws.Range("A" & r)
-        .Font.Bold = True
-        .Interior.Color = RGB(221, 235, 247)
-    End With
-
-    r = r + 1
-
-    ws.Range("A" & r).value = "Regnr"
-    ws.Range("B" & r).value = "Chassisnummer"
-    ws.Range("C" & r).value = "Kjopt dato"
-    ws.Range("D" & r).value = "Selger"
-
-    With ws.Range("A" & r & ":D" & r)
-        .Font.Bold = True
-        .Font.Color = RGB(255, 255, 255)
-        .Interior.Color = RGB(31, 78, 120)
-    End With
-
-    r = r + 1
-
-    For Each item In manglendeIBokforing
-
-        ws.Cells(r, 1).value = VariantToString(item("RegNo"))
-        ws.Cells(r, 2).value = VariantToString(item("ChassisNumber"))
-        ws.Cells(r, 3).value = item("TransactionDate")
-
-        ws.Cells(r, 4).value = ComputeOwnerLabel( _
-            VariantToString(item("FromOwnerType")), _
-            VariantToString(item("FromOwnerCompanyName")))
-
-        r = r + 1
-
-    Next item
-
-    If r > FIRST_DATA_ROW Then
-        ws.Range("C" & (r - manglendeIBokforing.Count) & ":C" & _
-            (r - 1)).NumberFormat = "dd.mm.yyyy"
-    End If
 
     ws.Columns("A").ColumnWidth = 14
     ws.Columns("B").ColumnWidth = 22
