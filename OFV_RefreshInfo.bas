@@ -1976,116 +1976,97 @@ Private Sub FargeleggStatusCelle( _
 End Sub
 
 
-' Skriver ut ett "bilkort" for en rad fra Seksjon A eller B: identitet,
-' forhandler, lagerperiode (fra dato - til dato) i ren tekst, og en
-' liten tabell med de to avgjorende transaksjonene (kjopt/solgt). r
-' flyttes forbi hele kortet (inkl. en tom linje til neste kort).
-Private Sub SkrivBilKort( _
+' Skriver "Forhandler: <navn>"-linjen som star over bil-tabellen i
+' Seksjon A og B, slik at det er tydelig hvilken forhandler Fra dato/
+' Til dato (lagerperioden) gjelder for - uten a matte gjenta det i en
+' egen kolonne pa hver av de mange radene.
+Private Sub SkrivForhandlerLinje( _
     ByVal ws As Worksheet, _
     ByRef r As Long, _
-    ByVal row As Object, _
-    ByVal buyerOrgName As String, _
-    ByVal flaggEtikett As String, _
-    ByVal flaggVerdi As String)
-
-    Dim statusText As String
-    Dim fraDato As Variant
-    Dim tilDato As Variant
-    Dim harKjopt As Boolean
-    Dim harSolgt As Boolean
-    Dim lagerTekst As String
-
-    statusText = VariantToString(row("Status"))
-    fraDato = row("FraDato")
-    tilDato = row("TilDato")
-    harKjopt = Not (IsNull(fraDato) Or IsEmpty(fraDato))
-    harSolgt = Not (IsNull(tilDato) Or IsEmpty(tilDato))
+    ByVal buyerOrgName As String)
 
     ws.Range("A" & r & ":I" & r).Merge
-    ws.Range("A" & r).value = _
-        VariantToString(row("RegnrInput")) & "   |   Modell: " & _
-        VariantToString(row("Modell")) & "   |   Chassisnummer: " & _
-        VariantToString(row("Chassisnummer"))
+    ws.Range("A" & r).value = "Forhandler: " & buyerOrgName
 
     With ws.Range("A" & r)
         .Font.Bold = True
-        .Interior.Color = RGB(221, 235, 247)
+        .Font.Italic = True
         .HorizontalAlignment = xlLeft
-        .VerticalAlignment = xlCenter
     End With
 
     r = r + 1
 
-    ws.Range("A" & r).value = "Forhandler"
-    ws.Range("A" & r).Font.Bold = True
-    ws.Range("B" & r & ":I" & r).Merge
-    ws.Range("B" & r).value = buyerOrgName
+End Sub
+
+
+' Skriver kolonneoverskriftene for bil-tabellen i Seksjon A/B - samme
+' 9 kolonner i begge, bare med ulik etikett pa kolonne D (flaggEtikett:
+' "I OFV-liste" i A, "Pa UB-liste" i B).
+Private Sub SkrivBilTabellHeader( _
+    ByVal ws As Worksheet, _
+    ByRef r As Long, _
+    ByVal flaggEtikett As String)
+
+    ws.Range("A" & r).value = "Regnr/VIN"
+    ws.Range("B" & r).value = "Chassisnummer"
+    ws.Range("C" & r).value = "Modell"
+    ws.Range("D" & r).value = flaggEtikett
+    ws.Range("E" & r).value = "Pa lager fra"
+    ws.Range("F" & r).value = "Kjopt fra"
+    ws.Range("G" & r).value = "Pa lager til"
+    ws.Range("H" & r).value = "Solgt til"
+    ws.Range("I" & r).value = "Status"
+
+    With ws.Range("A" & r & ":I" & r)
+        .Font.Bold = True
+        .Font.Color = RGB(255, 255, 255)
+        .Interior.Color = RGB(31, 78, 120)
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+        .WrapText = True
+        .RowHeight = 30
+    End With
+
     r = r + 1
 
-    ws.Range("A" & r).value = flaggEtikett
-    ws.Range("A" & r).Font.Bold = True
-    ws.Range("B" & r & ":I" & r).Merge
-    ws.Range("B" & r).value = flaggVerdi
-    r = r + 1
+End Sub
 
-    If harKjopt Then
-        If harSolgt Then
-            lagerTekst = "Pa lager fra " & Format$(fraDato, "dd.mm.yyyy") & _
-                " til " & Format$(tilDato, "dd.mm.yyyy") & "."
-        Else
-            lagerTekst = "Pa lager fra " & Format$(fraDato, "dd.mm.yyyy") & _
-                " (fortsatt pa lager)."
-        End If
+
+' Skriver en rad for en bil i Seksjon A/B - identitet, flagg, lager-
+' periode (Fra/Til dato) og de to avgjorende transaksjonene (kjopt/
+' solgt), alt i en og samme rad. Nar bilen ikke er solgt videre star
+' "Pa lager til" tomt og Solgt til-cellen far teksten "(fortsatt pa
+' lager)" i stedet for et kjopernavn.
+Private Sub SkrivBilRad( _
+    ByVal ws As Worksheet, _
+    ByRef r As Long, _
+    ByVal row As Object, _
+    ByVal flaggVerdi As String)
+
+    Dim statusText As String
+
+    statusText = VariantToString(row("Status"))
+
+    ws.Cells(r, 1).value = VariantToString(row("RegnrInput"))
+    ws.Cells(r, 2).value = VariantToString(row("Chassisnummer"))
+    ws.Cells(r, 3).value = VariantToString(row("Modell"))
+    ws.Cells(r, 4).value = flaggVerdi
+
+    ws.Cells(r, 5).value = row("FraDato")
+    ws.Cells(r, 5).NumberFormat = "dd.mm.yyyy"
+    ws.Cells(r, 6).value = VariantToString(row("KjoptFra"))
+
+    ws.Cells(r, 7).value = row("TilDato")
+    ws.Cells(r, 7).NumberFormat = "dd.mm.yyyy"
+
+    If Len(VariantToString(row("TilDato"))) > 0 Then
+        ws.Cells(r, 8).value = VariantToString(row("Kjoper"))
     Else
-        lagerTekst = "Ikke funnet hos forhandleren i OFV-historikken."
+        ws.Cells(r, 8).value = "(fortsatt pa lager)"
     End If
 
-    ws.Range("A" & r).value = "Pa lager"
-    ws.Range("A" & r).Font.Bold = True
-    ws.Range("B" & r & ":I" & r).Merge
-    ws.Range("B" & r).value = lagerTekst
-    r = r + 1
-
-    ws.Range("A" & r).value = "Status"
-    ws.Range("A" & r).Font.Bold = True
-    ws.Range("B" & r & ":I" & r).Merge
-    ws.Range("B" & r).value = statusText
-    FargeleggStatusCelle ws.Range("B" & r), statusText
-    r = r + 1
-
-    If harKjopt Then
-
-        ws.Range("A" & r).value = "Transaksjon"
-        ws.Range("B" & r).value = "Dato"
-        ws.Range("C" & r).value = "Fra"
-        ws.Range("D" & r).value = "Til"
-
-        With ws.Range("A" & r & ":D" & r)
-            .Font.Bold = True
-            .Interior.Color = RGB(221, 235, 247)
-        End With
-
-        r = r + 1
-
-        ws.Range("A" & r).value = "Kjopt"
-        ws.Range("B" & r).value = fraDato
-        ws.Range("B" & r).NumberFormat = "dd.mm.yyyy"
-        ws.Range("C" & r).value = VariantToString(row("KjoptFra"))
-        ws.Range("D" & r).value = buyerOrgName
-        r = r + 1
-
-        If harSolgt Then
-
-            ws.Range("A" & r).value = "Solgt"
-            ws.Range("B" & r).value = tilDato
-            ws.Range("B" & r).NumberFormat = "dd.mm.yyyy"
-            ws.Range("C" & r).value = buyerOrgName
-            ws.Range("D" & r).value = VariantToString(row("Kjoper"))
-            r = r + 1
-
-        End If
-
-    End If
+    ws.Cells(r, 9).value = statusText
+    FargeleggStatusCelle ws.Cells(r, 9), statusText
 
     r = r + 1
 
@@ -2255,12 +2236,16 @@ Private Sub UpdateVarekjopControlSheet( _
     ws.rows((r - 1) & ":" & r).RowHeight = 20
     r = r + 2
 
+    SkrivForhandlerLinje ws, r, buyerOrgName
+    SkrivBilTabellHeader ws, r, "I OFV-liste"
+
     For Each row In seksjonARows
 
-        SkrivBilKort ws, r, row, buyerOrgName, "I OFV-liste", _
-            VariantToString(row("IOFVListe"))
+        SkrivBilRad ws, r, row, VariantToString(row("IOFVListe"))
 
     Next row
+
+    r = r + 1
 
     '----------------------------------------------------------
     ' Seksjon B - IB (kjopt forrige periode). Vises bare hvis
@@ -2361,12 +2346,16 @@ Private Sub UpdateVarekjopControlSheet( _
     ws.rows((r - 1) & ":" & r).RowHeight = 20
     r = r + 2
 
+    SkrivForhandlerLinje ws, r, buyerOrgName
+    SkrivBilTabellHeader ws, r, "Pa UB-liste"
+
     For Each row In seksjonBRows
 
-        SkrivBilKort ws, r, row, buyerOrgName, "Pa UB-liste", _
-            VariantToString(row("PaUBListe"))
+        SkrivBilRad ws, r, row, VariantToString(row("PaUBListe"))
 
     Next row
+
+    r = r + 1
 
     End If
 
