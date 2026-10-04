@@ -70,8 +70,28 @@ Kjør [02_OFV_API_Kontroller](#notebook-1535288192161840) med samme `SELSKAP`-ve
 Denne notebooken:
 
 * leser de tre standardiserte inputfilene fra `Input/<Selskap>/`
+* hopper over kontroller der inputfilen mangler (i stedet for å stoppe)
 * kjører kontrollene
 * genererer samlet Excel-arbeidsbok og HTML-rapport i `Output/<Selskap>/`
+
+Celler i 02_OFV_API_Kontroller:
+
+* Celle 1: Konfigurasjon (widget, stier, secrets, farger)
+* Celle 2: Hjelpefunksjoner (API-kall med buffer, orgnr-/datotolking, input-lesere)
+* Celle 3: Hovedlogikk (de tre kontrollene)
+* Celle 4: Excel-arbeidsbok
+* Celle 5: HTML-rapport
+* Celle 6: Oppsummering (inkl. tidsbruk og antall API-kall)
+
+## HTML-rapporten
+
+`OFV_Kontroller_<tidsstempel>.html` er én selvstendig fil som virker uten nett:
+
+* faner: **Oversikt**, **Solgte biler**, **Varekjøp bruktbil**, **Demobil** og **Analyse**
+* hver kontroll har KPI-bokser (klikk for å filtrere), kontrollregelen, kontrolltabellen og full OFV-historikk
+* alle tabeller kan sorteres, søkes i og filtreres per kolonne (tekst, verdiliste, min/maks, fra/til-dato), filtreres på status, og eksporteres til CSV (filtrert utvalg)
+* Analyse-fanen viser nøkkeltall og grafer (status per kontroll, avviksfordeling, lagertid, hvem kjøper/selger, merke, drivstoff, eierskifter per måned)
+* lyst/mørkt tema og utskriftsvennlig layout
 
 ## Automatisk filgjenkjenning i 01_Verifisering_Input
 
@@ -165,6 +185,22 @@ Nøkler:
 
 * `ofv-api-key` — OFV API (påkrevd)
 * `vegvesen-api-key` — Statens vegvesen (valgfri, brukes som fallback for førstegangsregistrering)
+
+## Lokal test
+
+`tests/kjor_notebook_lokalt.py` kjører 02_OFV_API_Kontroller utenfor Databricks med falske OFV/SVV-svar og testdata (inkl. Demobil-tilfellet med tomme datoer). Brukes til å verifisere endringer før notebooken importeres til Databricks.
+
+## Endringslogg
+
+### 04.10.2026 – 02_OFV_API_Kontroller
+
+* **Feilretting Kontroll Demobil:** orgnr i Konfig-fanen ble lest som desimaltall (`933749312.0`) når DatoFra/DatoTil var tomme, så ingen biler matchet OFV sitt `933749312` og alle ble flagget som avvik. Orgnr normaliseres nå (`normalize_orgnr`) i alle tre kontrollene. Tom `OrgNrSelger` gir nå tom selvhandel-kolonne i stedet for «Nei».
+* Samme regnr/VIN slås opp bare én gang per kjøring (resultatet er identisk).
+* Kontroller uten inputfil hoppes over med tydelig melding.
+* Datoer i ISO-format (`aaaa-mm-dd`) som tekst tolkes også.
+* Excel: autofilter og frosne overskrifter i kontroll- og resultatfanene; ellers likt innhold.
+* Ny, interaktiv HTML-rapport (se over). Demobil viser i tillegg «Eid av enhet» (Ja/Nei) i HTML.
+* `jinja2` er ikke lenger nødvendig.
 
 ## Viktig ved videre endringer
 
