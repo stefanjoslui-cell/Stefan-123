@@ -833,10 +833,9 @@ Private Sub KjorVarekjopBruktbil()
     Dim queueUB As Object
     Dim queueApi As Object
     Dim vehicleRowsByKey As Object
-    Dim ofvListeRegNr As Object
-    Dim ofvListeVin As Object
     Dim resultRow As Object
     Dim innkjopRow As Object
+    Dim matchTxRow As Object
     Dim ibRow As Object
     Dim ubRow As Object
 
@@ -999,11 +998,6 @@ Private Sub KjorVarekjopBruktbil()
     Set seksjonBRows = New Collection
     Set seksjonCRows = New Collection
 
-    Set ofvListeRegNr = CreateObject("Scripting.Dictionary")
-    ofvListeRegNr.CompareMode = vbTextCompare
-    Set ofvListeVin = CreateObject("Scripting.Dictionary")
-    ofvListeVin.CompareMode = vbTextCompare
-
     fieldMap = GetFieldMap()
     fieldCount = UBound(fieldMap) + 1
     totalVehicles = queueApi.Count
@@ -1022,29 +1016,6 @@ Private Sub KjorVarekjopBruktbil()
     buyerOrgName = vbNullString
 
     For Each item In ofvListeRader
-
-        If Len(VariantToString(item("RegNo"))) > 0 Then
-
-            If Not ofvListeRegNr.Exists( _
-                NormalizeIdentifier(item("RegNo"))) Then
-
-                ofvListeRegNr.Add NormalizeIdentifier(item("RegNo")), True
-
-            End If
-
-        End If
-
-        If Len(VariantToString(item("ChassisNumber"))) > 0 Then
-
-            If Not ofvListeVin.Exists( _
-                NormalizeIdentifier(item("ChassisNumber"))) Then
-
-                ofvListeVin.Add _
-                    NormalizeIdentifier(item("ChassisNumber")), True
-
-            End If
-
-        End If
 
         If Len(buyerOrgName) = 0 Then
 
@@ -1099,7 +1070,9 @@ Private Sub KjorVarekjopBruktbil()
 
     '======================================================
     ' Seksjon A: Innkjop i perioden - eksistens + fullstendighet
-    ' mot OFV sin kjopsliste for organisasjonen (steg 1).
+    ' mot OFV sin kjopsliste for organisasjonen (steg 1), med den
+    ' faktiske matchede transaksjonen (Selger/Kjoper) vist for hver
+    ' bil - bade nar den stemmer og nar den ikke gjor det.
     '======================================================
 
     For Each key In queueInnkjop.Keys
@@ -1113,21 +1086,27 @@ Private Sub KjorVarekjopBruktbil()
             Set vehicleTxRows = vehicleRowsByKey(CStr(key))
         End If
 
-        erIOFVListe = False
+        ' Forst: er det en transaksjon i ofvListeRader (orgnr+periode-
+        ' kallet, derfor alltid DENNE forhandleren som kjoper) for
+        ' nettopp denne bilen? Flere kjop i perioden - bruker seneste.
+        Set matchTxRow = FinnKjopTransaksjonForForhandler( _
+            ofvListeRader, regNo, vin)
 
-        If Len(regNo) > 0 Then
-            If ofvListeRegNr.Exists(NormalizeIdentifier(regNo)) Then
-                erIOFVListe = True
-            End If
+        erIOFVListe = Not matchTxRow Is Nothing
+
+        ' Ingen treff pa denne forhandleren - vis i stedet den seneste
+        ' transaksjonen bilen faktisk hadde i perioden (uansett hvem),
+        ' slik at det er lett a se hvem andre som har kjopt den.
+        If matchTxRow Is Nothing Then
+
+            Set matchTxRow = FinnTransaksjonIPerioden( _
+                vehicleTxRows, CDate(dateFraRaw), CDate(dateTilRaw))
+
         End If
 
-        If Len(vin) > 0 Then
-            If ofvListeVin.Exists(NormalizeIdentifier(vin)) Then
-                erIOFVListe = True
-            End If
-        End If
+        Set innkjopRow = BuildInnkjopRow( _
+            regNo, vin, vehicleTxRows, erIOFVListe, matchTxRow)
 
-        Set innkjopRow = BuildInnkjopRow(regNo, vin, vehicleTxRows, erIOFVListe)
         seksjonARows.Add innkjopRow
 
     Next key
@@ -1526,13 +1505,120 @@ Private Sub ResolverKjoretoyfelter( _
 End Sub
 
 
+' Soker i OFV sin orgnr+periode-kjopsliste (ofvListeRader, fra
+' FetchOFVTransactionsByBuyerOrg) etter transaksjonen der DENNE
+' forhandleren kjopte nettopp denne bilen - listen er allerede
+' filtrert pa toOrganizationNumber=denne forhandleren av selve API-
+' kallet, sa et treff her kan ikke vaere en annen forhandlers kjop.
+' Flere treff (bilen kjopt flere ganger i perioden av samme
+' forhandler) - bruker seneste.
+Private Function FinnKjopTransaksjonForForhandler( _
+    ByVal ofvListeRader As Collection, _
+    ByVal regNo As String, _
+    ByVal vin As String) As Object
+
+    Dim item As Variant
+    Dim regNorm As String
+    Dim vinNorm As String
+    Dim best As Object
+
+    regNorm = NormalizeIdentifier(regNo)
+    vinNorm = NormalizeIdentifier(vin)
+
+    Set best = Nothing
+
+    For Each item In ofvListeRader
+
+        If (Len(regNorm) > 0 And _
+            NormalizeIdentifier(item("RegNo")) = regNorm) Or _
+           (Len(vinNorm) > 0 And _
+            NormalizeIdentifier(item("ChassisNumber")) = vinNorm) Then
+
+            If best Is Nothing Then
+
+                Set best = item
+
+            ElseIf IsDate(item("TransactionDate")) And _
+                IsDate(best("TransactionDate")) Then
+
+                If CDate(item("TransactionDate")) > _
+                    CDate(best("TransactionDate")) Then
+
+                    Set best = item
+
+                End If
+
+            End If
+
+        End If
+
+    Next item
+
+    Set FinnKjopTransaksjonForForhandler = best
+
+End Function
+
+
+' Nar bilen IKKE ble kjopt av forhandleren som kontrolleres, vises i
+' stedet den seneste transaksjonen bilen faktisk hadde i perioden -
+' uansett hvem som star som kjoper/selger - slik at det er lett a se
+' hvem andre som har kjopt bilen i perioden, i stedet for bare "Nei".
+Private Function FinnTransaksjonIPerioden( _
+    ByVal vehicleTxRows As Collection, _
+    ByVal dateFra As Date, _
+    ByVal dateTil As Date) As Object
+
+    Dim txRow As Variant
+    Dim best As Object
+
+    Set best = Nothing
+
+    If vehicleTxRows Is Nothing Then
+        Set FinnTransaksjonIPerioden = Nothing
+        Exit Function
+    End If
+
+    For Each txRow In vehicleTxRows
+
+        If VariantToString(txRow("Status")) = "OK" And _
+            IsDate(txRow("TransactionDate")) Then
+
+            If CDate(txRow("TransactionDate")) >= dateFra And _
+                CDate(txRow("TransactionDate")) <= dateTil Then
+
+                If best Is Nothing Then
+
+                    Set best = txRow
+
+                ElseIf CDate(txRow("TransactionDate")) > _
+                    CDate(best("TransactionDate")) Then
+
+                    Set best = txRow
+
+                End If
+
+            End If
+
+        End If
+
+    Next txRow
+
+    Set FinnTransaksjonIPerioden = best
+
+End Function
+
+
 ' Seksjon A - Innkjop i perioden: finnes bilen i OFV sin kjopsliste
-' for organisasjonen (steg 1)?
+' for organisasjonen (steg 1)? matchTxRow er selve transaksjonen (fra
+' FinnKjopTransaksjonForForhandler, eller - hvis ingen treff pa denne
+' forhandleren - FinnTransaksjonIPerioden), vist med Transaksjonsdato/
+' Selger/Kjoper slik at det er lett a se hva den faktisk inneholder.
 Private Function BuildInnkjopRow( _
     ByVal regNo As String, _
     ByVal vin As String, _
     ByVal vehicleTxRows As Collection, _
-    ByVal erIOFVListe As Boolean) As Object
+    ByVal erIOFVListe As Boolean, _
+    ByVal matchTxRow As Object) As Object
 
     Dim result As Object
     Dim chassisNo As String
@@ -1553,6 +1639,24 @@ Private Function BuildInnkjopRow( _
     result("Modell") = modelName
     result("IOFVListe") = IIf(erIOFVListe, "Ja", "Nei")
 
+    If Not matchTxRow Is Nothing Then
+
+        result("TransaksjonsDato") = matchTxRow("TransactionDate")
+        result("Selger") = ComputeOwnerLabel( _
+            VariantToString(matchTxRow("FromOwnerType")), _
+            VariantToString(matchTxRow("FromOwnerCompanyName")))
+        result("Kjoper") = ComputeOwnerLabel( _
+            VariantToString(matchTxRow("ToOwnerType")), _
+            VariantToString(matchTxRow("ToOwnerCompanyName")))
+
+    Else
+
+        result("TransaksjonsDato") = Empty
+        result("Selger") = vbNullString
+        result("Kjoper") = vbNullString
+
+    End If
+
     If erIOFVListe Then
         result("Status") = "OK - bekreftet i OFV"
     Else
@@ -1566,6 +1670,9 @@ End Function
 
 ' Seksjon A, tillegg - en bil OFV sier er kjopt av selskapet i
 ' perioden, men som ikke finnes i Innkjop-listen (fullstendighet).
+' ofvRow ER den matchede transaksjonen her, sa Selger/Kjoper fylles
+' direkte ut fra den - Kjoper vil alltid vaere denne forhandleren,
+' siden ofvRow kommer fra orgnr+periode-kjopslisten.
 Private Function BuildManglendeBokforingRow(ByVal ofvRow As Object) As Object
 
     Dim result As Object
@@ -1577,6 +1684,13 @@ Private Function BuildManglendeBokforingRow(ByVal ofvRow As Object) As Object
     result("Chassisnummer") = VariantToString(ofvRow("ChassisNumber"))
     result("Modell") = VariantToString(ofvRow("ModelName"))
     result("IOFVListe") = "Ja"
+    result("TransaksjonsDato") = ofvRow("TransactionDate")
+    result("Selger") = ComputeOwnerLabel( _
+        VariantToString(ofvRow("FromOwnerType")), _
+        VariantToString(ofvRow("FromOwnerCompanyName")))
+    result("Kjoper") = ComputeOwnerLabel( _
+        VariantToString(ofvRow("ToOwnerType")), _
+        VariantToString(ofvRow("ToOwnerCompanyName")))
     result("Status") = "Avvik: OFV viser kjop, mangler i bokforing"
 
     Set BuildManglendeBokforingRow = result
@@ -1926,9 +2040,12 @@ Private Sub UpdateVarekjopControlSheet( _
     ws.Range("B" & r).value = "Chassisnummer"
     ws.Range("C" & r).value = "Modell"
     ws.Range("D" & r).value = "I OFV-liste"
-    ws.Range("E" & r).value = "Status"
+    ws.Range("E" & r).value = "Transaksjonsdato"
+    ws.Range("F" & r).value = "Selger"
+    ws.Range("G" & r).value = "Kjoper"
+    ws.Range("H" & r).value = "Status"
 
-    With ws.Range("A" & r & ":E" & r)
+    With ws.Range("A" & r & ":H" & r)
         .Font.Bold = True
         .Font.Color = RGB(255, 255, 255)
         .Interior.Color = RGB(31, 78, 120)
@@ -1946,9 +2063,13 @@ Private Sub UpdateVarekjopControlSheet( _
         ws.Cells(r, 2).value = VariantToString(row("Chassisnummer"))
         ws.Cells(r, 3).value = VariantToString(row("Modell"))
         ws.Cells(r, 4).value = VariantToString(row("IOFVListe"))
-        ws.Cells(r, 5).value = VariantToString(row("Status"))
+        ws.Cells(r, 5).value = row("TransaksjonsDato")
+        ws.Cells(r, 5).NumberFormat = "dd.mm.yyyy"
+        ws.Cells(r, 6).value = VariantToString(row("Selger"))
+        ws.Cells(r, 7).value = VariantToString(row("Kjoper"))
+        ws.Cells(r, 8).value = VariantToString(row("Status"))
 
-        FargeleggStatusCelle ws.Cells(r, 5), VariantToString(row("Status"))
+        FargeleggStatusCelle ws.Cells(r, 8), VariantToString(row("Status"))
 
         r = r + 1
 
