@@ -1814,15 +1814,18 @@ Private Function BuildManglendeBokforingRow(ByVal ofvRow As Object) As Object
 End Function
 
 
-' Seksjon B - IB (kjopt forrige periode): viser hele syklusen for
-' bilen - nar og fra hvem den opprinnelig ble kjopt (for perioden,
-' derfor en IB-bil), og om den er solgt i perioden (selskapet star
-' som selger, bilen forlot bestanden, innenfor Dato fra - Dato til).
-' Er den ikke solgt, sjekkes den mot UB-listen. Det vanlige tilfellet
-' - kjopt forrige periode, solgt videre i denne - vises dermed som
-' Kjopt dato + Kjopt fra (tidligere periode) og Solgt dato + Solgt
-' til (denne perioden) i samme rad, slik at det er lett a se at
-' bilen faktisk var pa lager i perioden.
+' Seksjon B - IB (kjopt forrige periode): viser bilens faktiske
+' lagerperiode hos forhandleren - Fra dato (opprinnelig kjop, FOR
+' kontrollperioden - derfor en IB-bil) til Til dato (forste salg
+' ETTER det kjopet, uansett nar det falt - ikke begrenset til
+' kontrollperioden). Kontrollen er na et rent datointervall-oppslag:
+' bilen er OK sa lenge disse to periodene overlapper, altsa sa lenge
+' den faktisk var pa lager pa et eller annet tidspunkt i perioden -
+' om den ble solgt midt i perioden, rett etter, eller ikke i det hele
+' tatt (fortsatt pa lager) spiller ingen rolle for selve svaret.
+' Eneste avvik er nar OFV viser at bilen var solgt FOR perioden i det
+' hele tatt startet (altsa ikke pa lager noe sted i perioden), eller
+' nar det ikke finnes noe opprinnelig kjop a sjekke mot.
 Private Function BuildIBRow( _
     ByVal regNo As String, _
     ByVal vin As String, _
@@ -1838,15 +1841,14 @@ Private Function BuildIBRow( _
     Dim modelName As String
     Dim regNoResolved As String
     Dim buyerOrgNormalisert As String
-    Dim solgtTxRow As Object
     Dim kjoptTxRow As Object
+    Dim solgtTxRow As Object
 
     chassisNo = vin
     modelName = vbNullString
     regNoResolved = regNo
     buyerOrgNormalisert = NormalizeIdentifier(buyerOrgNo)
 
-    Set solgtTxRow = Nothing
     Set kjoptTxRow = Nothing
 
     If Not vehicleTxRows Is Nothing Then
@@ -1867,42 +1869,10 @@ Private Function BuildIBRow( _
                     regNoResolved = VariantToString(txRow("RegNo"))
                 End If
 
-                ' Solgt i perioden: selskapet er selger, og salget
-                ' ligger innenfor kontrollperioden. Stoler IKKE pa
-                ' RegistreringsType="Juridisk eierskifte (ikke i
-                ' bestand)" alene her - datauttrekk viser at OFV ikke
-                ' er konsekvent med dette merket (rundt 3 % av reelle
-                ' salg fra forhandler til privat/naering mangler det,
-                ' mens noen kjop FRA privat uventet har det). Ethvert
-                ' salg fra denne forhandleren i perioden telles derfor,
-                ' uavhengig av merket. Flere treff - bruker tidligste
-                ' (forste salg i perioden).
-                If NormalizeIdentifier(txRow("FromOwnerOrgNo")) = _
-                    buyerOrgNormalisert And _
-                    IsDate(txRow("TransactionDate")) Then
-
-                    If CDate(txRow("TransactionDate")) >= dateFra And _
-                        CDate(txRow("TransactionDate")) <= dateTil Then
-
-                        If solgtTxRow Is Nothing Then
-
-                            Set solgtTxRow = txRow
-
-                        ElseIf CDate(txRow("TransactionDate")) < _
-                            CDate(solgtTxRow("TransactionDate")) Then
-
-                            Set solgtTxRow = txRow
-
-                        End If
-
-                    End If
-
-                End If
-
-                ' Opprinnelig kjop: selskapet er kjoper, FOR denne
-                ' perioden startet (derfor en IB-bil). Flere kjop over
-                ' tid - bruker seneste (hvordan bilen kom pa lageret
-                ' sist, foran denne kontrollen).
+                ' Fra dato - opprinnelig kjop: selskapet er kjoper, FOR
+                ' denne perioden startet (derfor en IB-bil). Flere kjop
+                ' over tid - bruker seneste (hvordan bilen sist kom pa
+                ' lageret, foran denne kontrollen).
                 If NormalizeIdentifier(txRow("ToOwnerOrgNo")) = _
                     buyerOrgNormalisert And _
                     IsDate(txRow("TransactionDate")) Then
@@ -1928,6 +1898,39 @@ Private Function BuildIBRow( _
 
         Next txRow
 
+        ' Til dato - forste salg ETTER Fra dato (uansett nar, ikke
+        ' begrenset til perioden): bilens faktiske avgang fra lageret.
+        If Not kjoptTxRow Is Nothing Then
+
+            For Each txRow In vehicleTxRows
+
+                If VariantToString(txRow("Status")) = "OK" And _
+                    NormalizeIdentifier(txRow("FromOwnerOrgNo")) = _
+                    buyerOrgNormalisert And _
+                    IsDate(txRow("TransactionDate")) Then
+
+                    If CDate(txRow("TransactionDate")) > _
+                        CDate(kjoptTxRow("TransactionDate")) Then
+
+                        If solgtTxRow Is Nothing Then
+
+                            Set solgtTxRow = txRow
+
+                        ElseIf CDate(txRow("TransactionDate")) < _
+                            CDate(solgtTxRow("TransactionDate")) Then
+
+                            Set solgtTxRow = txRow
+
+                        End If
+
+                    End If
+
+                End If
+
+            Next txRow
+
+        End If
+
     End If
 
     Set result = CreateObject("Scripting.Dictionary")
@@ -1936,54 +1939,52 @@ Private Function BuildIBRow( _
     result("RegnrInput") = regNoResolved
     result("Chassisnummer") = chassisNo
     result("Modell") = modelName
+    result("PaUBListe") = IIf(erPaUBListe, "Ja", "Nei")
 
-    If Not kjoptTxRow Is Nothing Then
+    If kjoptTxRow Is Nothing Then
 
-        result("KjoptDato") = kjoptTxRow("TransactionDate")
+        result("FraDato") = Empty
+        result("KjoptFra") = vbNullString
+        result("TilDato") = Empty
+        result("Kjoper") = vbNullString
+        result("Status") = "Avvik: fant ikke opprinnelig kjop hos forhandleren"
+
+    Else
+
+        result("FraDato") = kjoptTxRow("TransactionDate")
         result("KjoptFra") = ComputeOwnerLabel( _
             VariantToString(kjoptTxRow("FromOwnerType")), _
             VariantToString(kjoptTxRow("FromOwnerCompanyName")))
 
-    Else
+        If solgtTxRow Is Nothing Then
 
-        result("KjoptDato") = Empty
-        result("KjoptFra") = vbNullString
+            ' Ikke solgt i det hele tatt etter kjopet - fortsatt pa
+            ' lager, altsa pa lager gjennom hele perioden.
+            result("TilDato") = Empty
+            result("Kjoper") = vbNullString
+            result("Status") = "OK - bilen var pa lager i perioden"
 
-    End If
-
-    If Not solgtTxRow Is Nothing Then
-
-        result("SolgtIPerioden") = "Ja"
-        result("SolgtDato") = solgtTxRow("TransactionDate")
-        result("Kjoper") = ComputeOwnerLabel( _
-            VariantToString(solgtTxRow("ToOwnerType")), _
-            VariantToString(solgtTxRow("ToOwnerCompanyName")))
-        result("PaUBListe") = vbNullString
-        result("Status") = "OK - solgt i perioden"
-
-        ' Perioden bilen stod pa lager hos forhandleren - fra
-        ' opprinnelig kjop til den ble solgt igjen. Kun mulig a vise
-        ' nar begge datoene er kjent.
-        If Not kjoptTxRow Is Nothing Then
-            result("DagerPaLager") = CLng(solgtTxRow("TransactionDate")) - _
-                CLng(kjoptTxRow("TransactionDate"))
         Else
-            result("DagerPaLager") = Empty
-        End If
 
-    Else
+            result("TilDato") = solgtTxRow("TransactionDate")
+            result("Kjoper") = ComputeOwnerLabel( _
+                VariantToString(solgtTxRow("ToOwnerType")), _
+                VariantToString(solgtTxRow("ToOwnerCompanyName")))
 
-        result("SolgtIPerioden") = "Nei"
-        result("SolgtDato") = Empty
-        result("Kjoper") = vbNullString
-        result("DagerPaLager") = Empty
-        result("PaUBListe") = IIf(erPaUBListe, "Ja", "Nei")
+            If CDate(solgtTxRow("TransactionDate")) >= dateFra Then
 
-        If erPaUBListe Then
-            result("Status") = "OK - fortsatt pa lager (bekreftet UB)"
-        Else
-            result("Status") = _
-                "Avvik: ikke solgt og ikke bekreftet pa lager (UB)"
+                ' Solgt pa eller etter periodens start - bilen var
+                ' altsa pa lager et sted i (eller gjennom hele) perioden.
+                result("Status") = "OK - bilen var pa lager i perioden"
+
+            Else
+
+                ' Solgt FOR perioden startet - bilen var ikke pa lager
+                ' noe sted i perioden i det hele tatt.
+                result("Status") = "Avvik: solgt for perioden startet"
+
+            End If
+
         End If
 
     End If
@@ -2073,8 +2074,8 @@ Private Sub UpdateVarekjopControlSheet( _
     Dim antallInnkjop As Long, bekreftetInnkjop As Long
     Dim avvikInnkjop As Long, manglendeBokforing As Long
 
-    Dim antallIB As Long, solgtIB As Long
-    Dim paLagerIB As Long, avvikIB As Long
+    Dim antallIB As Long, okIB As Long
+    Dim solgtForPeriodenIB As Long, ikkeFunnetIB As Long
 
     Dim antallUB As Long, forklartUB As Long, uforklartUB As Long
 
@@ -2084,7 +2085,7 @@ Private Sub UpdateVarekjopControlSheet( _
     ' Tittel og forklaring
     '----------------------------------------------------------
 
-    ws.Range("A1:K1").Merge
+    ws.Range("A1:I1").Merge
     ws.Range("A1").value = ws.Name
 
     With ws.Range("A1")
@@ -2098,7 +2099,7 @@ Private Sub UpdateVarekjopControlSheet( _
 
     ws.rows(1).RowHeight = 26
 
-    ws.Range("A2:K2").Merge
+    ws.Range("A2:I2").Merge
     ws.Range("A2").value = _
         "Kontrollregel: Innkjop i perioden (" & _
         Format$(dateFra, "dd.mm.yyyy") & " - " & _
@@ -2107,7 +2108,7 @@ Private Sub UpdateVarekjopControlSheet( _
         " (orgnr " & buyerOrgNo & ") i begge retninger: er bilen " & _
         "bekreftet av OFV, og er alt OFV sier er kjopt faktisk bokfort."
 
-    ws.Range("A3:K3").Merge
+    ws.Range("A3:I3").Merge
     ws.Range("A3").value = _
         "Seksjon B og C er tillegg og vises bare hvis IB- og/eller " & _
         "UB-listen er fylt ut: biler kjopt forrige periode (IB) " & _
@@ -2144,7 +2145,7 @@ Private Sub UpdateVarekjopControlSheet( _
 
     Next row
 
-    ws.Range("A" & r & ":K" & r).Merge
+    ws.Range("A" & r & ":I" & r).Merge
     ws.Range("A" & r).value = "A - Innkjop i perioden"
 
     With ws.Range("A" & r)
@@ -2269,17 +2270,22 @@ Private Sub UpdateVarekjopControlSheet( _
 
         antallIB = antallIB + 1
 
-        If VariantToString(row("SolgtIPerioden")) = "Ja" Then
-            solgtIB = solgtIB + 1
-        ElseIf VariantToString(row("PaUBListe")) = "Ja" Then
-            paLagerIB = paLagerIB + 1
-        Else
-            avvikIB = avvikIB + 1
-        End If
+        Select Case VariantToString(row("Status"))
+
+            Case "OK - bilen var pa lager i perioden"
+                okIB = okIB + 1
+
+            Case "Avvik: solgt for perioden startet"
+                solgtForPeriodenIB = solgtForPeriodenIB + 1
+
+            Case "Avvik: fant ikke opprinnelig kjop hos forhandleren"
+                ikkeFunnetIB = ikkeFunnetIB + 1
+
+        End Select
 
     Next row
 
-    ws.Range("A" & r & ":K" & r).Merge
+    ws.Range("A" & r & ":I" & r).Merge
     ws.Range("A" & r).value = "B - IB (kjopt forrige periode)"
 
     With ws.Range("A" & r)
@@ -2296,11 +2302,11 @@ Private Sub UpdateVarekjopControlSheet( _
     ws.Range("A" & (r - 1) & ":B" & (r - 1)).Merge
     ws.Range("A" & (r - 1)).value = "IB-biler"
     ws.Range("C" & (r - 1) & ":D" & (r - 1)).Merge
-    ws.Range("C" & (r - 1)).value = "Solgt i perioden"
+    ws.Range("C" & (r - 1)).value = "OK - pa lager i perioden"
     ws.Range("E" & (r - 1) & ":F" & (r - 1)).Merge
-    ws.Range("E" & (r - 1)).value = "Fortsatt pa lager"
+    ws.Range("E" & (r - 1)).value = "Avvik: solgt for perioden"
     ws.Range("G" & (r - 1) & ":H" & (r - 1)).Merge
-    ws.Range("G" & (r - 1)).value = "Avvik"
+    ws.Range("G" & (r - 1)).value = "Avvik: fant ikke kjop"
 
     With ws.Range("A" & (r - 1) & ":H" & (r - 1))
         .Font.Bold = True
@@ -2312,11 +2318,11 @@ Private Sub UpdateVarekjopControlSheet( _
     ws.Range("A" & r & ":B" & r).Merge
     ws.Range("A" & r).value = antallIB
     ws.Range("C" & r & ":D" & r).Merge
-    ws.Range("C" & r).value = solgtIB
+    ws.Range("C" & r).value = okIB
     ws.Range("E" & r & ":F" & r).Merge
-    ws.Range("E" & r).value = paLagerIB
+    ws.Range("E" & r).value = solgtForPeriodenIB
     ws.Range("G" & r & ":H" & r).Merge
-    ws.Range("G" & r).value = avvikIB
+    ws.Range("G" & r).value = ikkeFunnetIB
 
     With ws.Range("A" & r & ":B" & r)
         .Font.Bold = True
@@ -2335,8 +2341,8 @@ Private Sub UpdateVarekjopControlSheet( _
     With ws.Range("E" & r & ":F" & r)
         .Font.Bold = True
         .Font.Size = 16
-        .Interior.Color = COLOR_GREEN_FILL
-        .Font.Color = COLOR_GREEN_FONT
+        .Interior.Color = COLOR_RED_FILL
+        .Font.Color = COLOR_RED_FONT
         .HorizontalAlignment = xlCenter
     End With
 
@@ -2354,16 +2360,14 @@ Private Sub UpdateVarekjopControlSheet( _
     ws.Range("A" & r).value = "Regnr/VIN"
     ws.Range("B" & r).value = "Chassisnummer"
     ws.Range("C" & r).value = "Modell"
-    ws.Range("D" & r).value = "Kjopt dato"
+    ws.Range("D" & r).value = "Fra dato"
     ws.Range("E" & r).value = "Kjopt fra"
-    ws.Range("F" & r).value = "Solgt i perioden"
-    ws.Range("G" & r).value = "Solgt dato"
-    ws.Range("H" & r).value = "Solgt til"
-    ws.Range("I" & r).value = "Dager pa lager"
-    ws.Range("J" & r).value = "Pa UB-liste"
-    ws.Range("K" & r).value = "Status"
+    ws.Range("F" & r).value = "Til dato"
+    ws.Range("G" & r).value = "Solgt til"
+    ws.Range("H" & r).value = "Pa UB-liste"
+    ws.Range("I" & r).value = "Status"
 
-    With ws.Range("A" & r & ":K" & r)
+    With ws.Range("A" & r & ":I" & r)
         .Font.Bold = True
         .Font.Color = RGB(255, 255, 255)
         .Interior.Color = RGB(31, 78, 120)
@@ -2380,19 +2384,16 @@ Private Sub UpdateVarekjopControlSheet( _
         ws.Cells(r, 1).value = VariantToString(row("RegnrInput"))
         ws.Cells(r, 2).value = VariantToString(row("Chassisnummer"))
         ws.Cells(r, 3).value = VariantToString(row("Modell"))
-        ws.Cells(r, 4).value = row("KjoptDato")
+        ws.Cells(r, 4).value = row("FraDato")
         ws.Cells(r, 4).NumberFormat = "dd.mm.yyyy"
         ws.Cells(r, 5).value = VariantToString(row("KjoptFra"))
-        ws.Cells(r, 6).value = VariantToString(row("SolgtIPerioden"))
-        ws.Cells(r, 7).value = row("SolgtDato")
-        ws.Cells(r, 7).NumberFormat = "dd.mm.yyyy"
-        ws.Cells(r, 8).value = VariantToString(row("Kjoper"))
-        ws.Cells(r, 9).value = row("DagerPaLager")
-        ws.Cells(r, 9).NumberFormat = "0"" dager"""
-        ws.Cells(r, 10).value = VariantToString(row("PaUBListe"))
-        ws.Cells(r, 11).value = VariantToString(row("Status"))
+        ws.Cells(r, 6).value = row("TilDato")
+        ws.Cells(r, 6).NumberFormat = "dd.mm.yyyy"
+        ws.Cells(r, 7).value = VariantToString(row("Kjoper"))
+        ws.Cells(r, 8).value = VariantToString(row("PaUBListe"))
+        ws.Cells(r, 9).value = VariantToString(row("Status"))
 
-        FargeleggStatusCelle ws.Cells(r, 11), VariantToString(row("Status"))
+        FargeleggStatusCelle ws.Cells(r, 9), VariantToString(row("Status"))
 
         r = r + 1
 
@@ -2421,7 +2422,7 @@ Private Sub UpdateVarekjopControlSheet( _
 
     Next row
 
-    ws.Range("A" & r & ":K" & r).Merge
+    ws.Range("A" & r & ":I" & r).Merge
     ws.Range("A" & r).value = "C - UB (fortsatt pa lager)"
 
     With ws.Range("A" & r)
@@ -2523,11 +2524,9 @@ Private Sub UpdateVarekjopControlSheet( _
     ws.Columns("D").ColumnWidth = 16
     ws.Columns("E").ColumnWidth = 18
     ws.Columns("F").ColumnWidth = 25
-    ws.Columns("G").ColumnWidth = 16
+    ws.Columns("G").ColumnWidth = 22
     ws.Columns("H").ColumnWidth = 25
-    ws.Columns("I").ColumnWidth = 16
-    ws.Columns("J").ColumnWidth = 14
-    ws.Columns("K").ColumnWidth = 34
+    ws.Columns("I").ColumnWidth = 34
 
 End Sub
 
