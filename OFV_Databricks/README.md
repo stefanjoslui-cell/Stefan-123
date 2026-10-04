@@ -33,6 +33,9 @@ Innhold:
   * Resultatfiler per selskap
 * [README.md](#file-1535288192161842)
   * Denne dokumentasjonen
+* `Ressurser/`
+  * Excel-leser (SheetJS) og fonter som bygges inn i HTML-rapporten, slik at den virker uten nett
+  * Last opp filene fra repoets `OFV_Databricks/ressurser/` hit (mangler de, forsøker 02-notebooken å laste dem ned og lagre dem her)
 
 ## Mappestruktur per selskap
 
@@ -85,13 +88,18 @@ Celler i 02_OFV_API_Kontroller:
 
 ## HTML-rapporten
 
-`OFV_Kontroller_<tidsstempel>.html` er én selvstendig fil som virker uten nett:
+`OFV_Kontroller_<tidsstempel>.html` er én selvstendig fil i BDO-presentasjonsstil (Work Sans, rød aksent) som virker uten nett. Tilbake/Neste og prikkene nederst blar gjennom hele filen; menyen øverst på rapportsidene hopper direkte.
 
-* faner: **Oversikt**, **Solgte biler**, **Varekjøp bruktbil**, **Demobil** og **Analyse**
-* hver kontroll har KPI-bokser (klikk for å filtrere), kontrollregelen, kontrolltabellen og full OFV-historikk
-* alle tabeller kan sorteres, søkes i og filtreres per kolonne (tekst, verdiliste, min/maks, fra/til-dato), filtreres på status, og eksporteres til CSV (filtrert utvalg)
-* Analyse-fanen viser nøkkeltall og grafer (status per kontroll, avviksfordeling, lagertid, hvem kjøper/selger, merke, drivstoff, eierskifter per måned)
-* lyst/mørkt tema og utskriftsvennlig layout
+1. **Presentasjonen** (fra `kontroll_solgte_biler_8.html`, uendret): forside, før/nå og «Slik henter vi dataene» 1–3 med faste, anonymiserte eksempelbiler. «Til rapporten» hopper rett til rapportdelen.
+2. **Rapporten**:
+   * **Oversikt** – kjøreinfo og ett kort per kontroll
+   * **Per forhandler** – fordeling av dagers avvik per datasett i Kontroll solgte biler; klikk en rad for å filtrere Solgte biler
+   * **Solgte biler**, **Varekjøp bruktbil**, **Demobil** – KPI-bokser (klikk for å filtrere), kontrollregel, kontrolltabell og full OFV-historikk
+   * **Analyse** – nøkkeltall og grafer (status per kontroll, avviksfordeling, per forhandler, lagertid, hvem kjøper/selger, merke, drivstoff, eierskifter per måned)
+   * alle tabeller kan sorteres, søkes i og filtreres per kolonne (tekst, verdiliste, min/maks, fra/til-dato) og på status, og filtrert utvalg kan lastes ned som CSV
+3. **Spørsmål**-siden til slutt.
+
+**Tannhjulet** (nede til høyre, eller `#rediger` bak filnavnet) åpner panelet for bilder (forside, spørsmål-side, logo i Hovedboken-boksen) og datasett. Opptil 20 forhandlere fra Kontroll solgte biler kan limes inn (kopier tabellen inkl. overskriftsrad fra Excel) eller lastes opp som .xlsx – også Excel-arbeidsboken fra 02-notebooken. Databricks-kjøringen er alltid første datasett (navn = `SELSKAP`), og de innlimte vises sammen med den på Per forhandler, Solgte biler og Analyse. Alt skjer lokalt i nettleseren; innlimte data lagres i nettleseren per selskap.
 
 ## Automatisk filgjenkjenning i 01_Verifisering_Input
 
@@ -201,6 +209,13 @@ Nøkler:
 * Excel: autofilter og frosne overskrifter i kontroll- og resultatfanene; ellers likt innhold.
 * Ny, interaktiv HTML-rapport (se over). Demobil viser i tillegg «Eid av enhet» (Ja/Nei) i HTML.
 * `jinja2` er ikke lenger nødvendig.
+
+### 04.10.2026 – HTML-rapporten slått sammen med presentasjonen
+
+* Presentasjonen `kontroll_solgte_biler_8.html` (eksempelsidene, Per forhandler, Resultat, Spørsmål og tannhjul-panelet) er bygd inn i HTML-rapporten. Eksempelsidene er kopiert uendret.
+* Resultat-siden er slått sammen med Solgte biler; innlimte datasett vises sammen med Databricks-kjøringen.
+* Innliming finner nå overskriftsraden selv om den ikke er første rad (f.eks. Excel-arket fra Databricks), og kjenner igjen kolonnene `Selvhandel` og `Førstegangsreg.`.
+* Felles BDO-tema for hele filen. Excel-leseren og fontene bygges inn fra `Ressurser/`, så filen virker uten nett.
 
 ## Viktig ved videre endringer
 

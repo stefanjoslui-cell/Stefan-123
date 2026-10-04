@@ -5,6 +5,8 @@ DatoFra/DatoTil, som utloste orgnr-feilen), stubber dbutils og requests, og
 kjorer alle kodecellene. Krever pandas, openpyxl og requests.
 
 Bruk: python tests/kjor_notebook_lokalt.py <notebook.ipynb> <arbeidsmappe> [--uten-varekjop]
+
+Sett OFV_RESSURSER=ressurser for a bygge Excel-leser og fonter inn i HTML-filen.
 """
 import json
 import os
@@ -21,6 +23,10 @@ SELSKAP = "Test 1"
 base = os.path.join(work, "OFV API")
 inp = os.path.join(base, "Input", SELSKAP)
 os.makedirs(inp, exist_ok=True)
+# Valgfritt: kopier HTML-ressursene (Excel-leser og fonter) inn i Ressurser/
+if os.environ.get("OFV_RESSURSER"):
+    import shutil
+    shutil.copytree(os.environ["OFV_RESSURSER"], os.path.join(base, "Ressurser"), dirs_exist_ok=True)
 
 rnd = random.Random(42)
 PCSO = ("933749312", "Premium Cars Stor-Oslo AS")
