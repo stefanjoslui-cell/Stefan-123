@@ -1093,14 +1093,55 @@ Private Sub KjorVarekjopBruktbil()
     Next key
 
     ' Biler OFV sier er kjopt av selskapet i perioden, men som IKKE
-    ' finnes i Innkjop-listen (fullstendighet pa bokforingen).
+    ' finnes i Innkjop-listen (fullstendighet pa bokforingen). Disse har
+    ' ikke fatt hentet full transaksjonshistorikk ennaa (de star ikke i
+    ' queueApi) - hent den na, bade for lagerperiode-beregningen under
+    ' og for a fa dem med i Resultat Varekjop.
     For Each item In ofvListeRader
 
         ofvRegNorm = NormalizeIdentifier(item("RegNo"))
         ofvVinNorm = NormalizeIdentifier(item("ChassisNumber"))
 
         If Not FinnesIListe(queueInnkjop, ofvRegNorm, ofvVinNorm) Then
-            seksjonARows.Add BuildManglendeBokforingRow(item)
+
+            dictionaryKey = BuildVehicleKey(ofvVinNorm, ofvRegNorm)
+            Set vehicleTxRows = Nothing
+
+            If Len(dictionaryKey) > 0 Then
+
+                If Not vehicleRowsByKey.Exists(dictionaryKey) Then
+
+                    useVin = (Len(ofvVinNorm) > 0)
+                    If useVin Then
+                        identifier = ofvVinNorm
+                    Else
+                        identifier = ofvRegNorm
+                    End If
+
+                    API_ShowStatus "OFV", _
+                        "Eierskifter (mangler i bokforing)", identifier
+
+                    Set vehicleRows = FetchOFVTransactions( _
+                        ofvKey, identifier, useVin, ofvRegNorm, ofvVinNorm)
+
+                    vehicleRowsByKey.Add dictionaryKey, New Collection
+
+                    For Each resultRow In vehicleRows
+                        allRows.Add resultRow
+                        vehicleRowsByKey(dictionaryKey).Add resultRow
+                    Next resultRow
+
+                    Sleep API_PAUSE_MS
+
+                End If
+
+                Set vehicleTxRows = vehicleRowsByKey(dictionaryKey)
+
+            End If
+
+            seksjonARows.Add BuildManglendeBokforingRow( _
+                item, vehicleTxRows, buyerOrgNo, CDate(dateTilRaw))
+
         End If
 
     Next item
@@ -1745,27 +1786,58 @@ End Function
 
 ' Seksjon A, tillegg - en bil OFV sier er kjopt av selskapet i
 ' perioden, men som ikke finnes i Innkjop-listen (fullstendighet).
-' ofvRow ER den matchede transaksjonen her, sa Kjopt fra/Til dato
-' fylles direkte ut fra den - Kjoper (her: hvem bilen ble kjopt fra)
-' vil alltid vaere relevant for denne forhandleren, siden ofvRow
-' kommer fra orgnr+periode-kjopslisten.
-Private Function BuildManglendeBokforingRow(ByVal ofvRow As Object) As Object
+' vehicleTxRows er na full transaksjonshistorikk for bilen (hentet av
+' kalleren), sa Fra dato/Til dato finnes med samme FinnLagerperiode-
+' motor som Seksjon A/B - ofvRow brukes bare som sikkert fallback om
+' historikk-kallet av noen grunn ikke gir treff.
+Private Function BuildManglendeBokforingRow( _
+    ByVal ofvRow As Object, _
+    ByVal vehicleTxRows As Collection, _
+    ByVal buyerOrgNo As String, _
+    ByVal dateTil As Date) As Object
 
     Dim result As Object
+    Dim chassisNo As String
+    Dim modelName As String
+    Dim regNoResolved As String
+    Dim kjoptTxRow As Object
+    Dim solgtTxRow As Object
+
+    chassisNo = VariantToString(ofvRow("ChassisNumber"))
+    modelName = VariantToString(ofvRow("ModelName"))
+    regNoResolved = VariantToString(ofvRow("RegNo"))
+
+    FinnLagerperiode vehicleTxRows, buyerOrgNo, dateTil, _
+        kjoptTxRow, solgtTxRow, chassisNo, modelName, regNoResolved
+
+    If kjoptTxRow Is Nothing Then Set kjoptTxRow = ofvRow
 
     Set result = CreateObject("Scripting.Dictionary")
     result.CompareMode = vbTextCompare
 
-    result("RegnrInput") = VariantToString(ofvRow("RegNo"))
-    result("Chassisnummer") = VariantToString(ofvRow("ChassisNumber"))
-    result("Modell") = VariantToString(ofvRow("ModelName"))
+    result("RegnrInput") = regNoResolved
+    result("Chassisnummer") = chassisNo
+    result("Modell") = modelName
     result("IOFVListe") = "Ja"
-    result("FraDato") = ofvRow("TransactionDate")
+    result("FraDato") = kjoptTxRow("TransactionDate")
     result("KjoptFra") = ComputeOwnerLabel( _
-        VariantToString(ofvRow("FromOwnerType")), _
-        VariantToString(ofvRow("FromOwnerCompanyName")))
-    result("TilDato") = Empty
-    result("Kjoper") = vbNullString
+        VariantToString(kjoptTxRow("FromOwnerType")), _
+        VariantToString(kjoptTxRow("FromOwnerCompanyName")))
+
+    If Not solgtTxRow Is Nothing Then
+
+        result("TilDato") = solgtTxRow("TransactionDate")
+        result("Kjoper") = ComputeOwnerLabel( _
+            VariantToString(solgtTxRow("ToOwnerType")), _
+            VariantToString(solgtTxRow("ToOwnerCompanyName")))
+
+    Else
+
+        result("TilDato") = Empty
+        result("Kjoper") = vbNullString
+
+    End If
+
     result("Status") = "Avvik: OFV viser kjop, mangler i bokforing"
 
     Set BuildManglendeBokforingRow = result
@@ -1900,6 +1972,122 @@ Private Sub FargeleggStatusCelle( _
         celle.Font.Color = COLOR_RED_FONT
 
     End If
+
+End Sub
+
+
+' Skriver ut ett "bilkort" for en rad fra Seksjon A eller B: identitet,
+' forhandler, lagerperiode (fra dato - til dato) i ren tekst, og en
+' liten tabell med de to avgjorende transaksjonene (kjopt/solgt). r
+' flyttes forbi hele kortet (inkl. en tom linje til neste kort).
+Private Sub SkrivBilKort( _
+    ByVal ws As Worksheet, _
+    ByRef r As Long, _
+    ByVal row As Object, _
+    ByVal buyerOrgName As String, _
+    ByVal flaggEtikett As String, _
+    ByVal flaggVerdi As String)
+
+    Dim statusText As String
+    Dim fraDato As Variant
+    Dim tilDato As Variant
+    Dim harKjopt As Boolean
+    Dim harSolgt As Boolean
+    Dim lagerTekst As String
+
+    statusText = VariantToString(row("Status"))
+    fraDato = row("FraDato")
+    tilDato = row("TilDato")
+    harKjopt = Not (IsNull(fraDato) Or IsEmpty(fraDato))
+    harSolgt = Not (IsNull(tilDato) Or IsEmpty(tilDato))
+
+    ws.Range("A" & r & ":I" & r).Merge
+    ws.Range("A" & r).value = _
+        VariantToString(row("RegnrInput")) & "   |   Modell: " & _
+        VariantToString(row("Modell")) & "   |   Chassisnummer: " & _
+        VariantToString(row("Chassisnummer"))
+
+    With ws.Range("A" & r)
+        .Font.Bold = True
+        .Interior.Color = RGB(221, 235, 247)
+        .HorizontalAlignment = xlLeft
+        .VerticalAlignment = xlCenter
+    End With
+
+    r = r + 1
+
+    ws.Range("A" & r).value = "Forhandler"
+    ws.Range("A" & r).Font.Bold = True
+    ws.Range("B" & r & ":I" & r).Merge
+    ws.Range("B" & r).value = buyerOrgName
+    r = r + 1
+
+    ws.Range("A" & r).value = flaggEtikett
+    ws.Range("A" & r).Font.Bold = True
+    ws.Range("B" & r & ":I" & r).Merge
+    ws.Range("B" & r).value = flaggVerdi
+    r = r + 1
+
+    If harKjopt Then
+        If harSolgt Then
+            lagerTekst = "Pa lager fra " & Format$(fraDato, "dd.mm.yyyy") & _
+                " til " & Format$(tilDato, "dd.mm.yyyy") & "."
+        Else
+            lagerTekst = "Pa lager fra " & Format$(fraDato, "dd.mm.yyyy") & _
+                " (fortsatt pa lager)."
+        End If
+    Else
+        lagerTekst = "Ikke funnet hos forhandleren i OFV-historikken."
+    End If
+
+    ws.Range("A" & r).value = "Pa lager"
+    ws.Range("A" & r).Font.Bold = True
+    ws.Range("B" & r & ":I" & r).Merge
+    ws.Range("B" & r).value = lagerTekst
+    r = r + 1
+
+    ws.Range("A" & r).value = "Status"
+    ws.Range("A" & r).Font.Bold = True
+    ws.Range("B" & r & ":I" & r).Merge
+    ws.Range("B" & r).value = statusText
+    FargeleggStatusCelle ws.Range("B" & r), statusText
+    r = r + 1
+
+    If harKjopt Then
+
+        ws.Range("A" & r).value = "Transaksjon"
+        ws.Range("B" & r).value = "Dato"
+        ws.Range("C" & r).value = "Fra"
+        ws.Range("D" & r).value = "Til"
+
+        With ws.Range("A" & r & ":D" & r)
+            .Font.Bold = True
+            .Interior.Color = RGB(221, 235, 247)
+        End With
+
+        r = r + 1
+
+        ws.Range("A" & r).value = "Kjopt"
+        ws.Range("B" & r).value = fraDato
+        ws.Range("B" & r).NumberFormat = "dd.mm.yyyy"
+        ws.Range("C" & r).value = VariantToString(row("KjoptFra"))
+        ws.Range("D" & r).value = buyerOrgName
+        r = r + 1
+
+        If harSolgt Then
+
+            ws.Range("A" & r).value = "Solgt"
+            ws.Range("B" & r).value = tilDato
+            ws.Range("B" & r).NumberFormat = "dd.mm.yyyy"
+            ws.Range("C" & r).value = buyerOrgName
+            ws.Range("D" & r).value = VariantToString(row("Kjoper"))
+            r = r + 1
+
+        End If
+
+    End If
+
+    r = r + 1
 
 End Sub
 
@@ -2067,49 +2255,12 @@ Private Sub UpdateVarekjopControlSheet( _
     ws.rows((r - 1) & ":" & r).RowHeight = 20
     r = r + 2
 
-    ws.Range("A" & r).value = "Regnr/VIN"
-    ws.Range("B" & r).value = "Chassisnummer"
-    ws.Range("C" & r).value = "Modell"
-    ws.Range("D" & r).value = "I OFV-liste"
-    ws.Range("E" & r).value = "Fra dato"
-    ws.Range("F" & r).value = "Kjopt fra"
-    ws.Range("G" & r).value = "Til dato"
-    ws.Range("H" & r).value = "Solgt til"
-    ws.Range("I" & r).value = "Status"
-
-    With ws.Range("A" & r & ":I" & r)
-        .Font.Bold = True
-        .Font.Color = RGB(255, 255, 255)
-        .Interior.Color = RGB(31, 78, 120)
-        .HorizontalAlignment = xlCenter
-        .VerticalAlignment = xlCenter
-        .WrapText = True
-        .RowHeight = 30
-    End With
-
-    r = r + 1
-
     For Each row In seksjonARows
 
-        ws.Cells(r, 1).value = VariantToString(row("RegnrInput"))
-        ws.Cells(r, 2).value = VariantToString(row("Chassisnummer"))
-        ws.Cells(r, 3).value = VariantToString(row("Modell"))
-        ws.Cells(r, 4).value = VariantToString(row("IOFVListe"))
-        ws.Cells(r, 5).value = row("FraDato")
-        ws.Cells(r, 5).NumberFormat = "dd.mm.yyyy"
-        ws.Cells(r, 6).value = VariantToString(row("KjoptFra"))
-        ws.Cells(r, 7).value = row("TilDato")
-        ws.Cells(r, 7).NumberFormat = "dd.mm.yyyy"
-        ws.Cells(r, 8).value = VariantToString(row("Kjoper"))
-        ws.Cells(r, 9).value = VariantToString(row("Status"))
-
-        FargeleggStatusCelle ws.Cells(r, 9), VariantToString(row("Status"))
-
-        r = r + 1
+        SkrivBilKort ws, r, row, buyerOrgName, "I OFV-liste", _
+            VariantToString(row("IOFVListe"))
 
     Next row
-
-    r = r + 1
 
     '----------------------------------------------------------
     ' Seksjon B - IB (kjopt forrige periode). Vises bare hvis
@@ -2210,49 +2361,12 @@ Private Sub UpdateVarekjopControlSheet( _
     ws.rows((r - 1) & ":" & r).RowHeight = 20
     r = r + 2
 
-    ws.Range("A" & r).value = "Regnr/VIN"
-    ws.Range("B" & r).value = "Chassisnummer"
-    ws.Range("C" & r).value = "Modell"
-    ws.Range("D" & r).value = "Fra dato"
-    ws.Range("E" & r).value = "Kjopt fra"
-    ws.Range("F" & r).value = "Til dato"
-    ws.Range("G" & r).value = "Solgt til"
-    ws.Range("H" & r).value = "Pa UB-liste"
-    ws.Range("I" & r).value = "Status"
-
-    With ws.Range("A" & r & ":I" & r)
-        .Font.Bold = True
-        .Font.Color = RGB(255, 255, 255)
-        .Interior.Color = RGB(31, 78, 120)
-        .HorizontalAlignment = xlCenter
-        .VerticalAlignment = xlCenter
-        .WrapText = True
-        .RowHeight = 30
-    End With
-
-    r = r + 1
-
     For Each row In seksjonBRows
 
-        ws.Cells(r, 1).value = VariantToString(row("RegnrInput"))
-        ws.Cells(r, 2).value = VariantToString(row("Chassisnummer"))
-        ws.Cells(r, 3).value = VariantToString(row("Modell"))
-        ws.Cells(r, 4).value = row("FraDato")
-        ws.Cells(r, 4).NumberFormat = "dd.mm.yyyy"
-        ws.Cells(r, 5).value = VariantToString(row("KjoptFra"))
-        ws.Cells(r, 6).value = row("TilDato")
-        ws.Cells(r, 6).NumberFormat = "dd.mm.yyyy"
-        ws.Cells(r, 7).value = VariantToString(row("Kjoper"))
-        ws.Cells(r, 8).value = VariantToString(row("PaUBListe"))
-        ws.Cells(r, 9).value = VariantToString(row("Status"))
-
-        FargeleggStatusCelle ws.Cells(r, 9), VariantToString(row("Status"))
-
-        r = r + 1
+        SkrivBilKort ws, r, row, buyerOrgName, "Pa UB-liste", _
+            VariantToString(row("PaUBListe"))
 
     Next row
-
-    r = r + 1
 
     End If
 
