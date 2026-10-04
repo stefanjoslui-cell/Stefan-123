@@ -6,7 +6,8 @@ kjorer alle kodecellene. Krever pandas, openpyxl og requests.
 
 Bruk: python tests/kjor_notebook_lokalt.py <notebook.ipynb> <arbeidsmappe> [--uten-varekjop]
 
-Sett OFV_RESSURSER=ressurser for a bygge Excel-leser og fonter inn i HTML-filen.
+Sett OFV_RESSURSER=ressurser for a bygge Excel-leser og fonter inn i HTML-filen,
+og FREMDRIFT_VISNING=tekst|html|widget for a overstyre fremdriftsvinduet.
 """
 import json
 import os
@@ -195,6 +196,8 @@ for c in nb["cells"]:
     if src.lstrip().startswith("%pip"):
         continue
     src = src.replace('"/Workspace/Users/stefan.luidold@bdo.no/OFV API"', repr(base))
+    if os.environ.get("FREMDRIFT_VISNING"):
+        src = src.replace('FREMDRIFT_VISNING = "auto"', 'FREMDRIFT_VISNING = %r' % os.environ["FREMDRIFT_VISNING"])
     exec(compile(src, "<cell>", "exec"), ns)
 
 print("HTML:", ns["OUTPUT_HTML"])

@@ -86,6 +86,8 @@ Celler i 02_OFV_API_Kontroller:
 * Celle 5: HTML-rapport
 * Celle 6: Oppsummering (inkl. tidsbruk og antall API-kall)
 
+Under kjøringen viser Celle 3 et **fremdriftsvindu** (som frmFremdrift i VBA): samlet fremdrift med tid brukt og anslått gjenstående tid, én linje per kontroll (Venter / Kjører / Ferdig) og gjeldende OFV-/SVV-oppslag. Styres av `FREMDRIFT_VISNING` i Celle 1: `"auto"` (standard), `"widget"`, `"html"` eller `"tekst"` (én tekstlinje per bil som før). Viser `"auto"` et vindu som ikke oppdaterer seg, sett den til `"html"`. Med levende vindu skrives fremdriften som tekst hver 10. prosent (synlig i jobbloggen).
+
 ## HTML-rapporten
 
 `OFV_Kontroller_<tidsstempel>.html` er én selvstendig fil i BDO-presentasjonsstil (Work Sans, rød aksent) som virker uten nett. Tilbake/Neste og prikkene nederst blar gjennom hele filen; menyen øverst på rapportsidene hopper direkte.
@@ -216,6 +218,10 @@ Nøkler:
 * Resultat-siden er slått sammen med Solgte biler; innlimte datasett vises sammen med Databricks-kjøringen.
 * Innliming finner nå overskriftsraden selv om den ikke er første rad (f.eks. Excel-arket fra Databricks), og kjenner igjen kolonnene `Selvhandel` og `Førstegangsreg.`.
 * Felles BDO-tema for hele filen. Excel-leseren og fontene bygges inn fra `Ressurser/`, så filen virker uten nett.
+
+### 04.10.2026 – Fremdriftsvindu i 02_OFV_API_Kontroller
+
+* Celle 3 viser et levende fremdriftsvindu med gjenstående tid, fremdrift per kontroll og gjeldende OFV/SVV-oppslag. Ny innstilling `FREMDRIFT_VISNING` i Celle 1.
 
 ## Viktig ved videre endringer
 
