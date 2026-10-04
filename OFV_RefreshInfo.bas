@@ -2012,8 +2012,8 @@ Private Sub SkrivBilTabellHeader( _
     ws.Range("C" & r).value = "Modell"
     ws.Range("D" & r).value = flaggEtikett
     ws.Range("E" & r).value = "Pa lager fra"
-    ws.Range("F" & r).value = "Kjopt fra"
-    ws.Range("G" & r).value = "Pa lager til"
+    ws.Range("F" & r).value = "Pa lager til"
+    ws.Range("G" & r).value = "Kjopt fra"
     ws.Range("H" & r).value = "Solgt til"
     ws.Range("I" & r).value = "Status"
 
@@ -2054,10 +2054,11 @@ Private Sub SkrivBilRad( _
 
     ws.Cells(r, 5).value = row("FraDato")
     ws.Cells(r, 5).NumberFormat = "dd.mm.yyyy"
-    ws.Cells(r, 6).value = VariantToString(row("KjoptFra"))
 
-    ws.Cells(r, 7).value = row("TilDato")
-    ws.Cells(r, 7).NumberFormat = "dd.mm.yyyy"
+    ws.Cells(r, 6).value = row("TilDato")
+    ws.Cells(r, 6).NumberFormat = "dd.mm.yyyy"
+
+    ws.Cells(r, 7).value = VariantToString(row("KjoptFra"))
 
     If Len(VariantToString(row("TilDato"))) > 0 Then
         ws.Cells(r, 8).value = VariantToString(row("Kjoper"))
@@ -2479,8 +2480,8 @@ Private Sub UpdateVarekjopControlSheet( _
     ws.Columns("C").ColumnWidth = 18
     ws.Columns("D").ColumnWidth = 16
     ws.Columns("E").ColumnWidth = 18
-    ws.Columns("F").ColumnWidth = 25
-    ws.Columns("G").ColumnWidth = 22
+    ws.Columns("F").ColumnWidth = 18
+    ws.Columns("G").ColumnWidth = 25
     ws.Columns("H").ColumnWidth = 25
     ws.Columns("I").ColumnWidth = 34
 
