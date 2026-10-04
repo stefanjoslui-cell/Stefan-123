@@ -126,12 +126,6 @@ Private Const COLOR_RED_FONT As Long = 393372       ' RGB(156,0,6)
 Private Const AVVIK_GRONN_MAX As Long = 2
 Private Const AVVIK_GUL_MAX As Long = 14
 
-' RegistreringsType-verdi som (etter avtale) betyr at kjoretoyet
-' forlot den registrerte eierens aktive bestand i denne transaksjonen -
-' brukes til "avregistrert"-sjekken i Varekjop bruktbil.
-Private Const REGTYPE_IKKE_BESTAND As String = _
-    "Juridisk eierskifte (ikke i bestand)"
-
 ' Instans av UserForm-en "frmFremdrift" (fremdriftsvindu-popup), satt
 ' av VisFremdriftVindu. Nothing hvis skjemaet ikke finnes/ikke ble
 ' opprettet - resten av koden sjekker alltid for dette, sa fravaer av
@@ -1789,13 +1783,18 @@ Private Function BuildIBRow( _
                     regNoResolved = VariantToString(txRow("RegNo"))
                 End If
 
-                ' Solgt i perioden: selskapet er selger, bilen forlot
-                ' bestanden, og salget ligger innenfor kontrollperioden.
-                ' Flere treff - bruker tidligste (forste salg i perioden).
+                ' Solgt i perioden: selskapet er selger, og salget
+                ' ligger innenfor kontrollperioden. Stoler IKKE pa
+                ' RegistreringsType="Juridisk eierskifte (ikke i
+                ' bestand)" alene her - datauttrekk viser at OFV ikke
+                ' er konsekvent med dette merket (rundt 3 % av reelle
+                ' salg fra forhandler til privat/naering mangler det,
+                ' mens noen kjop FRA privat uventet har det). Ethvert
+                ' salg fra denne forhandleren i perioden telles derfor,
+                ' uavhengig av merket. Flere treff - bruker tidligste
+                ' (forste salg i perioden).
                 If NormalizeIdentifier(txRow("FromOwnerOrgNo")) = _
                     buyerOrgNormalisert And _
-                    VariantToString(txRow("RegistrationType")) = _
-                    REGTYPE_IKKE_BESTAND And _
                     IsDate(txRow("TransactionDate")) Then
 
                     If CDate(txRow("TransactionDate")) >= dateFra And _
