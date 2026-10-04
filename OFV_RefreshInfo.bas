@@ -21,8 +21,12 @@ Option Explicit
 '   Kontroll 2 - "Varekjop bruktbil" (kolonne F-H):
 '     G8         = Juridisk enhet (Org Nr) - kjoper, organisasjonsnummer
 '     G9 / G10   = Dato fra / Dato til (perioden det sjekkes OFV-kjop i)
-'     F12 og ned = Regnr, G12 og ned = VIN
-'     H12 og ned = Bokfort dato
+'     F12 og ned = Innkjop i perioden (regnr/VIN blandet i samme kolonne)
+'     G12 og ned = IB - biler kjopt forrige periode (regnr/VIN blandet)
+'     H12 og ned = UB - biler fortsatt pa lager ved kontrolltidspunktet
+'                  (regnr/VIN blandet)
+'     Alle tre listene er rene identifikatorlister, uten egen
+'     bokfort-dato-kolonne - se KjorVarekjopBruktbil for kontrollogikken.
 '
 '   Kontroll 3 - "Kontroll Demobil" (kolonne J-L):
 '     K8         = Juridisk enhet - organisasjonsnummer
@@ -75,9 +79,9 @@ Private Const ORG_CELL_2 As String = "G8"
 Private Const DATOFRA_CELL_2 As String = "G9"
 Private Const DATOTIL_CELL_2 As String = "G10"
 Private Const FIRST_ROW_2 As Long = 12
-Private Const COL_REGNR_2 As Long = 6   ' F
-Private Const COL_VIN_2 As Long = 7     ' G
-Private Const COL_BOKFORT_2 As Long = 8 ' H
+Private Const COL_INNKJOP_2 As Long = 6  ' F - Innkjop i perioden
+Private Const COL_IB_2 As Long = 7       ' G - IB (kjopt forrige periode)
+Private Const COL_UB_2 As Long = 8       ' H - UB (fortsatt pa lager)
 
 ' --- Kontroll 3: Kontroll Demobil ---
 Private Const RESULT_SHEET_3 As String = "Resultat Demobil"
@@ -824,23 +828,28 @@ Private Sub KjorVarekjopBruktbil()
     Dim wsControl As Worksheet
     Dim loResult As ListObject
 
-    Dim queue As Object
+    Dim queueInnkjop As Object
+    Dim queueIB As Object
+    Dim queueUB As Object
+    Dim queueApi As Object
     Dim vehicleRowsByKey As Object
     Dim ofvListeRegNr As Object
     Dim ofvListeVin As Object
     Dim resultRow As Object
-    Dim kontrollRow As Object
+    Dim innkjopRow As Object
+    Dim ibRow As Object
+    Dim ubRow As Object
 
     Dim allRows As Collection
     Dim vehicleRows As Collection
-    Dim kontrollRows As Collection
+    Dim seksjonARows As Collection
+    Dim seksjonBRows As Collection
+    Dim seksjonCRows As Collection
     Dim vehicleTxRows As Collection
     Dim ofvListeRader As Collection
-    Dim manglendeIBokforing As Collection
 
     Dim fieldMap As Variant
     Dim vehicleData As Variant
-    Dim bokfortValue As Variant
     Dim output() As Variant
 
     Dim ofvKey As String
@@ -850,7 +859,6 @@ Private Sub KjorVarekjopBruktbil()
     Dim dateTilRaw As Variant
     Dim stage As String
 
-    Dim lastInputRow As Long
     Dim oldLastRow As Long
     Dim newLastRow As Long
     Dim fieldCount As Long
@@ -863,14 +871,14 @@ Private Sub KjorVarekjopBruktbil()
 
     Dim regNo As String
     Dim vin As String
-    Dim inputIdent As String
-    Dim queueKey As String
     Dim identifier As String
     Dim dictionaryKey As String
 
     Dim useVin As Boolean
     Dim erIOFVListe As Boolean
-    Dim finnesIInput As Boolean
+    Dim erPaUBListe As Boolean
+    Dim erIIB As Boolean
+    Dim erIInnkjop As Boolean
     Dim ofvRegNorm As String
     Dim ofvVinNorm As String
 
@@ -940,45 +948,36 @@ Private Sub KjorVarekjopBruktbil()
         GoTo SafeExit2
     End If
 
-    lastInputRow = LastRowInEitherColumn( _
-        wsInput, FIRST_ROW_2, COL_REGNR_2, COL_VIN_2)
+    stage = "leser Innkjop/IB/UB-listene"
 
-    Set queue = CreateObject("Scripting.Dictionary")
-    queue.CompareMode = vbTextCompare
+    Set queueInnkjop = ReadIdentifikatorListe(wsInput, FIRST_ROW_2, COL_INNKJOP_2)
+    Set queueIB = ReadIdentifikatorListe(wsInput, FIRST_ROW_2, COL_IB_2)
+    Set queueUB = ReadIdentifikatorListe(wsInput, FIRST_ROW_2, COL_UB_2)
 
-    For r = FIRST_ROW_2 To lastInputRow
-
-        inputIdent = ReadInputIdentifier( _
-            wsInput, r, COL_REGNR_2, COL_VIN_2)
-
-        regNo = vbNullString
-        vin = vbNullString
-
-        If Len(inputIdent) > 0 Then
-            If ErVIN(inputIdent) Then
-                vin = inputIdent
-            Else
-                regNo = inputIdent
-            End If
-        End If
-
-        bokfortValue = wsInput.Cells(r, COL_BOKFORT_2).value
-
-        queueKey = BuildVehicleKey(vin, regNo)
-
-        If Len(queueKey) > 0 Then
-            If Not queue.Exists(queueKey) Then
-                queue.Add queueKey, Array(regNo, vin, bokfortValue)
-            End If
-        End If
-
-    Next r
-
-    If queue.Count = 0 Then
-        MsgBox "Fant ingen registreringsnummer eller VIN i " & _
-            "Varekjop bruktbil-listen.", vbInformation, "Varekjop bruktbil"
+    If queueInnkjop.Count = 0 And queueIB.Count = 0 And queueUB.Count = 0 Then
+        MsgBox "Fant ingen registreringsnummer eller VIN i Innkjop-, " & _
+            "IB- eller UB-listen for Varekjop bruktbil.", _
+            vbInformation, "Varekjop bruktbil"
         GoTo SafeExit2
     End If
+
+    ' Biler som trenger full transaksjonshistorikk fra OFV (steg 2):
+    ' union av Innkjop og IB. UB trenger ikke eget API-kall - den
+    ' brukes bare som oppslag i seksjon B og C.
+    Set queueApi = CreateObject("Scripting.Dictionary")
+    queueApi.CompareMode = vbTextCompare
+
+    For Each key In queueInnkjop.Keys
+        If Not queueApi.Exists(CStr(key)) Then
+            queueApi.Add CStr(key), queueInnkjop(key)
+        End If
+    Next key
+
+    For Each key In queueIB.Keys
+        If Not queueApi.Exists(CStr(key)) Then
+            queueApi.Add CStr(key), queueIB(key)
+        End If
+    Next key
 
     oldScreenUpdating = Application.ScreenUpdating
     oldEnableEvents = Application.EnableEvents
@@ -996,8 +995,9 @@ Private Sub KjorVarekjopBruktbil()
     Set allRows = New Collection
     Set vehicleRowsByKey = CreateObject("Scripting.Dictionary")
     vehicleRowsByKey.CompareMode = vbTextCompare
-    Set kontrollRows = New Collection
-    Set manglendeIBokforing = New Collection
+    Set seksjonARows = New Collection
+    Set seksjonBRows = New Collection
+    Set seksjonCRows = New Collection
 
     Set ofvListeRegNr = CreateObject("Scripting.Dictionary")
     ofvListeRegNr.CompareMode = vbTextCompare
@@ -1006,7 +1006,7 @@ Private Sub KjorVarekjopBruktbil()
 
     fieldMap = GetFieldMap()
     fieldCount = UBound(fieldMap) + 1
-    totalVehicles = queue.Count
+    totalVehicles = queueApi.Count
 
     '======================================================
     ' Steg 1: hent listen over ALLE biler OFV sier er kjopt av
@@ -1060,13 +1060,13 @@ Private Sub KjorVarekjopBruktbil()
     Next item
 
     '======================================================
-    ' Steg 2: full transaksjonshistorikk per bil i input-listen
+    ' Steg 2: full transaksjonshistorikk per bil i Innkjop + IB
     '======================================================
 
-    For Each key In queue.Keys
+    For Each key In queueApi.Keys
 
         currentVehicle = currentVehicle + 1
-        vehicleData = queue(key)
+        vehicleData = queueApi(key)
 
         regNo = CStr(vehicleData(0))
         vin = CStr(vehicleData(1))
@@ -1097,9 +1097,16 @@ Private Sub KjorVarekjopBruktbil()
 
     Next key
 
-    For Each key In queue.Keys
+    '======================================================
+    ' Seksjon A: Innkjop i perioden - eksistens + fullstendighet
+    ' mot OFV sin kjopsliste for organisasjonen (steg 1).
+    '======================================================
 
-        vehicleData = queue(key)
+    For Each key In queueInnkjop.Keys
+
+        vehicleData = queueInnkjop(key)
+        regNo = CStr(vehicleData(0))
+        vin = CStr(vehicleData(1))
 
         Set vehicleTxRows = Nothing
         If vehicleRowsByKey.Exists(CStr(key)) Then
@@ -1108,55 +1115,84 @@ Private Sub KjorVarekjopBruktbil()
 
         erIOFVListe = False
 
-        If Len(CStr(vehicleData(0))) > 0 Then
-            If ofvListeRegNr.Exists( _
-                NormalizeIdentifier(CStr(vehicleData(0)))) Then
+        If Len(regNo) > 0 Then
+            If ofvListeRegNr.Exists(NormalizeIdentifier(regNo)) Then
                 erIOFVListe = True
             End If
         End If
 
-        If Len(CStr(vehicleData(1))) > 0 Then
-            If ofvListeVin.Exists( _
-                NormalizeIdentifier(CStr(vehicleData(1)))) Then
+        If Len(vin) > 0 Then
+            If ofvListeVin.Exists(NormalizeIdentifier(vin)) Then
                 erIOFVListe = True
             End If
         End If
 
-        Set kontrollRow = BuildVarekjopRow( _
-            CStr(vehicleData(0)), CStr(vehicleData(1)), _
-            vehicleData(2), vehicleTxRows, erIOFVListe, buyerOrgNo)
-
-        kontrollRows.Add kontrollRow
+        Set innkjopRow = BuildInnkjopRow(regNo, vin, vehicleTxRows, erIOFVListe)
+        seksjonARows.Add innkjopRow
 
     Next key
 
-    ' Ekstra: biler OFV sier er kjopt av selskapet i perioden, men som
-    ' IKKE finnes i det hele tatt i bokforingslisten (input).
+    ' Biler OFV sier er kjopt av selskapet i perioden, men som IKKE
+    ' finnes i Innkjop-listen (fullstendighet pa bokforingen).
     For Each item In ofvListeRader
 
         ofvRegNorm = NormalizeIdentifier(item("RegNo"))
         ofvVinNorm = NormalizeIdentifier(item("ChassisNumber"))
-        finnesIInput = False
 
-        For Each key In queue.Keys
-
-            vehicleData = queue(key)
-
-            If (Len(ofvRegNorm) > 0 And _
-                NormalizeIdentifier(CStr(vehicleData(0))) = ofvRegNorm) Or _
-               (Len(ofvVinNorm) > 0 And _
-                NormalizeIdentifier(CStr(vehicleData(1))) = ofvVinNorm) Then
-
-                finnesIInput = True
-                Exit For
-
-            End If
-
-        Next key
-
-        If Not finnesIInput Then manglendeIBokforing.Add item
+        If Not FinnesIListe(queueInnkjop, ofvRegNorm, ofvVinNorm) Then
+            seksjonARows.Add BuildManglendeBokforingRow(item)
+        End If
 
     Next item
+
+    '======================================================
+    ' Seksjon B: IB (kjopt forrige periode) - solgt i perioden,
+    ' eller fortsatt pa lager (bekreftet mot UB-listen)?
+    '======================================================
+
+    For Each key In queueIB.Keys
+
+        vehicleData = queueIB(key)
+        regNo = CStr(vehicleData(0))
+        vin = CStr(vehicleData(1))
+
+        Set vehicleTxRows = Nothing
+        If vehicleRowsByKey.Exists(CStr(key)) Then
+            Set vehicleTxRows = vehicleRowsByKey(CStr(key))
+        End If
+
+        erPaUBListe = queueUB.Exists(CStr(key))
+
+        Set ibRow = BuildIBRow(regNo, vin, vehicleTxRows, buyerOrgNo, _
+            CDate(dateFraRaw), CDate(dateTilRaw), erPaUBListe)
+
+        seksjonBRows.Add ibRow
+
+    Next key
+
+    '======================================================
+    ' Seksjon C: UB - forklart (funnet i IB eller Innkjop) eller
+    ' uforklart lagerbeholdning?
+    '======================================================
+
+    For Each key In queueUB.Keys
+
+        vehicleData = queueUB(key)
+        regNo = CStr(vehicleData(0))
+        vin = CStr(vehicleData(1))
+
+        Set vehicleTxRows = Nothing
+        If vehicleRowsByKey.Exists(CStr(key)) Then
+            Set vehicleTxRows = vehicleRowsByKey(CStr(key))
+        End If
+
+        erIIB = queueIB.Exists(CStr(key))
+        erIInnkjop = queueInnkjop.Exists(CStr(key))
+
+        Set ubRow = BuildUBRow(regNo, vin, vehicleTxRows, erIIB, erIInnkjop)
+        seksjonCRows.Add ubRow
+
+    Next key
 
     '======================================================
     ' RESULTAT
@@ -1265,8 +1301,8 @@ Private Sub KjorVarekjopBruktbil()
 
     If Len(buyerOrgName) = 0 Then buyerOrgName = buyerOrgNo
 
-    UpdateVarekjopControlSheet wsControl, kontrollRows, _
-        manglendeIBokforing, totalVehicles, buyerOrgNo, buyerOrgName, _
+    UpdateVarekjopControlSheet wsControl, seksjonARows, seksjonBRows, _
+        seksjonCRows, buyerOrgNo, buyerOrgName, _
         CDate(dateFraRaw), CDate(dateTilRaw)
 
     Application.Calculation = oldCalculation
@@ -1287,13 +1323,23 @@ Private Sub KjorVarekjopBruktbil()
 
     SkjulFremdriftVindu
 
-    MsgBox "Varekjop bruktbil er oppdatert." & vbCrLf & vbCrLf & _
-        totalVehicles & " biler lest fra input." & vbCrLf & _
-        ofvListeRader.Count & " OFV-transaksjoner funnet for org " & _
-        buyerOrgNo & " i perioden." & vbCrLf & _
-        manglendeIBokforing.Count & _
-        " biler OFV viser kjopt, men som mangler i bokforingslisten.", _
-        vbInformation, "Varekjop bruktbil"
+    Dim sammendrag2 As String
+
+    sammendrag2 = "Varekjop bruktbil er oppdatert." & vbCrLf & vbCrLf & _
+        queueInnkjop.Count & " biler i Innkjop-listen." & vbCrLf
+
+    If queueIB.Count > 0 Then
+        sammendrag2 = sammendrag2 & queueIB.Count & " biler i IB-listen." & vbCrLf
+    End If
+
+    If queueUB.Count > 0 Then
+        sammendrag2 = sammendrag2 & queueUB.Count & " biler i UB-listen." & vbCrLf
+    End If
+
+    sammendrag2 = sammendrag2 & ofvListeRader.Count & _
+        " OFV-transaksjoner funnet for org " & buyerOrgNo & " i perioden."
+
+    MsgBox sammendrag2, vbInformation, "Varekjop bruktbil"
 
     Exit Sub
 
@@ -1444,36 +1490,126 @@ End Function
 ' erIOFVListe: True hvis regnr/VIN ble funnet i OFV sin liste over
 ' biler kjopt av buyerOrgNo i perioden (fra det orgnr-baserte
 ' samlekallet - IKKE fra bilens egen transaksjonshistorikk).
-Private Function BuildVarekjopRow( _
+' Henter ut Chassisnummer/Modell/Regnr fra den forste OK-transaksjonen
+' som har en verdi, pa samme mate som BuildInnkjopRow/BuildUBRow trenger
+' det - delt ut i egen Sub siden tre av byggefunksjonene gjor dette likt.
+Private Sub ResolverKjoretoyfelter( _
+    ByVal vehicleTxRows As Collection, _
+    ByRef chassisNo As String, _
+    ByRef modelName As String, _
+    ByRef regNoResolved As String)
+
+    Dim txRow As Variant
+
+    If vehicleTxRows Is Nothing Then Exit Sub
+
+    For Each txRow In vehicleTxRows
+
+        If VariantToString(txRow("Status")) = "OK" Then
+
+            If Len(modelName) = 0 Then
+                modelName = VariantToString(txRow("ModelName"))
+            End If
+
+            If Len(VariantToString(txRow("ChassisNumber"))) > 0 Then
+                chassisNo = VariantToString(txRow("ChassisNumber"))
+            End If
+
+            If Len(VariantToString(txRow("RegNo"))) > 0 Then
+                regNoResolved = VariantToString(txRow("RegNo"))
+            End If
+
+        End If
+
+    Next txRow
+
+End Sub
+
+
+' Seksjon A - Innkjop i perioden: finnes bilen i OFV sin kjopsliste
+' for organisasjonen (steg 1)?
+Private Function BuildInnkjopRow( _
     ByVal regNo As String, _
     ByVal vin As String, _
-    ByVal bokfortRaw As Variant, _
     ByVal vehicleTxRows As Collection, _
-    ByVal erIOFVListe As Boolean, _
-    ByVal buyerOrgNo As String) As Object
+    ByVal erIOFVListe As Boolean) As Object
 
     Dim result As Object
-    Dim txRow As Variant
-    Dim bokfortDate As Variant
-    Dim modelName As String
     Dim chassisNo As String
+    Dim modelName As String
     Dim regNoResolved As String
-    Dim buyerOrgNormalisert As String
 
-    Dim kjoptTxRow As Object
-    Dim avregistrertTxRow As Object
+    chassisNo = vin
+    modelName = vbNullString
+    regNoResolved = regNo
+
+    ResolverKjoretoyfelter vehicleTxRows, chassisNo, modelName, regNoResolved
 
     Set result = CreateObject("Scripting.Dictionary")
     result.CompareMode = vbTextCompare
 
-    bokfortDate = TolkBokfortDato(bokfortRaw)
-    modelName = vbNullString
+    result("RegnrInput") = regNoResolved
+    result("Chassisnummer") = chassisNo
+    result("Modell") = modelName
+    result("IOFVListe") = IIf(erIOFVListe, "Ja", "Nei")
+
+    If erIOFVListe Then
+        result("Status") = "OK - bekreftet i OFV"
+    Else
+        result("Status") = "Avvik: ikke bekreftet av OFV i perioden"
+    End If
+
+    Set BuildInnkjopRow = result
+
+End Function
+
+
+' Seksjon A, tillegg - en bil OFV sier er kjopt av selskapet i
+' perioden, men som ikke finnes i Innkjop-listen (fullstendighet).
+Private Function BuildManglendeBokforingRow(ByVal ofvRow As Object) As Object
+
+    Dim result As Object
+
+    Set result = CreateObject("Scripting.Dictionary")
+    result.CompareMode = vbTextCompare
+
+    result("RegnrInput") = VariantToString(ofvRow("RegNo"))
+    result("Chassisnummer") = VariantToString(ofvRow("ChassisNumber"))
+    result("Modell") = VariantToString(ofvRow("ModelName"))
+    result("IOFVListe") = "Ja"
+    result("Status") = "Avvik: OFV viser kjop, mangler i bokforing"
+
+    Set BuildManglendeBokforingRow = result
+
+End Function
+
+
+' Seksjon B - IB (kjopt forrige periode): er bilen solgt i perioden
+' (selskapet star som selger, bilen forlot bestanden, innenfor
+' Dato fra - Dato til)? Er den ikke solgt, sjekkes den mot UB-listen.
+Private Function BuildIBRow( _
+    ByVal regNo As String, _
+    ByVal vin As String, _
+    ByVal vehicleTxRows As Collection, _
+    ByVal buyerOrgNo As String, _
+    ByVal dateFra As Date, _
+    ByVal dateTil As Date, _
+    ByVal erPaUBListe As Boolean) As Object
+
+    Dim result As Object
+    Dim txRow As Variant
+    Dim chassisNo As String
+    Dim modelName As String
+    Dim regNoResolved As String
+    Dim buyerOrgNormalisert As String
+    Dim solgtTxRow As Object
+
     chassisNo = vin
+    modelName = vbNullString
     regNoResolved = regNo
     buyerOrgNormalisert = NormalizeIdentifier(buyerOrgNo)
 
-    Set kjoptTxRow = Nothing
-    Set avregistrertTxRow = Nothing
+    Set solgtTxRow = Nothing
 
     If Not vehicleTxRows Is Nothing Then
 
@@ -1493,51 +1629,26 @@ Private Function BuildVarekjopRow( _
                     regNoResolved = VariantToString(txRow("RegNo"))
                 End If
 
-                ' Kjopt av juridisk enhet: en transaksjon der
-                ' selskapet star som kjoper (til-siden). Bruker den
-                ' seneste hvis flere.
-                If NormalizeIdentifier(txRow("ToOwnerOrgNo")) = _
-                    buyerOrgNormalisert Then
-
-                    If kjoptTxRow Is Nothing Then
-
-                        Set kjoptTxRow = txRow
-
-                    ElseIf IsDate(txRow("TransactionDate")) And _
-                        IsDate(kjoptTxRow("TransactionDate")) Then
-
-                        If CDate(txRow("TransactionDate")) > _
-                            CDate(kjoptTxRow("TransactionDate")) Then
-
-                            Set kjoptTxRow = txRow
-
-                        End If
-
-                    End If
-
-                End If
-
-                ' Avregistrert av juridisk enhet: en transaksjon der
-                ' selskapet star som selger (fra-siden) OG
-                ' registreringstypen viser at bilen forlot bestanden.
-                ' Bruker den tidligste slike (forste avregistrering
-                ' etter kjop).
+                ' Solgt i perioden: selskapet er selger, bilen forlot
+                ' bestanden, og salget ligger innenfor kontrollperioden.
+                ' Flere treff - bruker tidligste (forste salg i perioden).
                 If NormalizeIdentifier(txRow("FromOwnerOrgNo")) = _
                     buyerOrgNormalisert And _
                     VariantToString(txRow("RegistrationType")) = _
-                    REGTYPE_IKKE_BESTAND Then
+                    REGTYPE_IKKE_BESTAND And _
+                    IsDate(txRow("TransactionDate")) Then
 
-                    If avregistrertTxRow Is Nothing Then
+                    If CDate(txRow("TransactionDate")) >= dateFra And _
+                        CDate(txRow("TransactionDate")) <= dateTil Then
 
-                        Set avregistrertTxRow = txRow
+                        If solgtTxRow Is Nothing Then
 
-                    ElseIf IsDate(txRow("TransactionDate")) And _
-                        IsDate(avregistrertTxRow("TransactionDate")) Then
+                            Set solgtTxRow = txRow
 
-                        If CDate(txRow("TransactionDate")) < _
-                            CDate(avregistrertTxRow("TransactionDate")) Then
+                        ElseIf CDate(txRow("TransactionDate")) < _
+                            CDate(solgtTxRow("TransactionDate")) Then
 
-                            Set avregistrertTxRow = txRow
+                            Set solgtTxRow = txRow
 
                         End If
 
@@ -1551,89 +1662,136 @@ Private Function BuildVarekjopRow( _
 
     End If
 
+    Set result = CreateObject("Scripting.Dictionary")
+    result.CompareMode = vbTextCompare
+
     result("RegnrInput") = regNoResolved
     result("Chassisnummer") = chassisNo
     result("Modell") = modelName
-    result("BokfortDato") = bokfortDate
-    result("IOFVListe") = IIf(erIOFVListe, "Ja", "Nei")
-    result("IBokfort") = IIf(IsEmpty(bokfortDate), "Nei", "Ja")
 
-    If Not kjoptTxRow Is Nothing Then
-        result("KjoptDato") = kjoptTxRow("TransactionDate")
-        result("KjoptAvEnhet") = "Ja"
-    Else
-        result("KjoptDato") = Empty
-        result("KjoptAvEnhet") = "Nei"
-    End If
+    If Not solgtTxRow Is Nothing Then
 
-    If Not avregistrertTxRow Is Nothing Then
-
-        result("AvregistrertDato") = avregistrertTxRow("TransactionDate")
-        result("Avregistrert") = "Ja"
+        result("SolgtIPerioden") = "Ja"
+        result("SolgtDato") = solgtTxRow("TransactionDate")
+        result("Kjoper") = ComputeOwnerLabel( _
+            VariantToString(solgtTxRow("ToOwnerType")), _
+            VariantToString(solgtTxRow("ToOwnerCompanyName")))
+        result("PaUBListe") = vbNullString
+        result("Status") = "OK - solgt i perioden"
 
     Else
 
-        result("AvregistrertDato") = Empty
+        result("SolgtIPerioden") = "Nei"
+        result("SolgtDato") = Empty
+        result("Kjoper") = vbNullString
+        result("PaUBListe") = IIf(erPaUBListe, "Ja", "Nei")
 
-        If kjoptTxRow Is Nothing Then
-            result("Avregistrert") = vbNullString
+        If erPaUBListe Then
+            result("Status") = "OK - fortsatt pa lager (bekreftet UB)"
         Else
-            result("Avregistrert") = "Nei"
+            result("Status") = _
+                "Avvik: ikke solgt og ikke bekreftet pa lager (UB)"
         End If
 
     End If
 
-    If erIOFVListe And IsEmpty(bokfortDate) Then
-
-        result("Status") = "Avvik: OFV viser kjop, mangler i bokforing"
-
-    ElseIf Not erIOFVListe And Not IsEmpty(bokfortDate) Then
-
-        result("Status") = _
-            "Avvik: Bokfort, ikke bekreftet kjopt av OFV i perioden"
-
-    ElseIf erIOFVListe And Not IsEmpty(bokfortDate) And _
-        result("Avregistrert") = "Ja" Then
-
-        result("Status") = "OK - kjopt og avregistrert"
-
-    ElseIf erIOFVListe And Not IsEmpty(bokfortDate) Then
-
-        result("Status") = "OK - kjopt, ikke avregistrert enna"
-
-    Else
-        result("Status") = "Ingen treff"
-    End If
-
-    Set BuildVarekjopRow = result
+    Set BuildIBRow = result
 
 End Function
 
 
-' Bygger hele arket Kontroll Varekjop Bruktbil pa nytt hver kjoring.
+' Seksjon C - UB (fortsatt pa lager ved kontrolltidspunkt): finnes
+' bilen i IB eller Innkjop-listen (forklart), eller er den uten kjent
+' opprinnelse (uforklart)?
+Private Function BuildUBRow( _
+    ByVal regNo As String, _
+    ByVal vin As String, _
+    ByVal vehicleTxRows As Collection, _
+    ByVal erIIB As Boolean, _
+    ByVal erIInnkjop As Boolean) As Object
+
+    Dim result As Object
+    Dim chassisNo As String
+    Dim modelName As String
+    Dim regNoResolved As String
+
+    chassisNo = vin
+    modelName = vbNullString
+    regNoResolved = regNo
+
+    ResolverKjoretoyfelter vehicleTxRows, chassisNo, modelName, regNoResolved
+
+    Set result = CreateObject("Scripting.Dictionary")
+    result.CompareMode = vbTextCompare
+
+    result("RegnrInput") = regNoResolved
+    result("Chassisnummer") = chassisNo
+    result("Modell") = modelName
+    result("FunnetIIB") = IIf(erIIB, "Ja", "Nei")
+    result("FunnetIInnkjop") = IIf(erIInnkjop, "Ja", "Nei")
+
+    If erIIB Or erIInnkjop Then
+        result("Status") = "OK - forklart"
+    Else
+        result("Status") = "Avvik: uforklart lagerbeholdning"
+    End If
+
+    Set BuildUBRow = result
+
+End Function
+
+
+' Fargelegger en statuscelle gronn (OK) eller rod (Avvik) etter samme
+' konvensjon som resten av kontrollarkene.
+Private Sub FargeleggStatusCelle( _
+    ByVal celle As Range, _
+    ByVal statusText As String)
+
+    If Left$(statusText, 2) = "OK" Then
+
+        celle.Interior.Color = COLOR_GREEN_FILL
+        celle.Font.Color = COLOR_GREEN_FONT
+
+    ElseIf Left$(statusText, 5) = "Avvik" Then
+
+        celle.Interior.Color = COLOR_RED_FILL
+        celle.Font.Color = COLOR_RED_FONT
+
+    End If
+
+End Sub
+
+
+' Bygger hele arket Kontroll Varekjop Bruktbil pa nytt hver kjoring -
+' tre seksjoner under hverandre (A: Innkjop i perioden, B: IB, C: UB).
 Private Sub UpdateVarekjopControlSheet( _
     ByVal ws As Worksheet, _
-    ByVal kontrollRows As Collection, _
-    ByVal manglendeIBokforing As Collection, _
-    ByVal totalVehicles As Long, _
+    ByVal seksjonARows As Collection, _
+    ByVal seksjonBRows As Collection, _
+    ByVal seksjonCRows As Collection, _
     ByVal buyerOrgNo As String, _
     ByVal buyerOrgName As String, _
     ByVal dateFra As Date, _
     ByVal dateTil As Date)
 
-    Const HEADER_ROW As Long = 9
-    Const FIRST_DATA_ROW As Long = 10
-
     Dim row As Object
     Dim r As Long
-    Dim lastRow As Long
-    Dim antallOk As Long
-    Dim antallAvvik As Long
-    Dim statusText As String
+
+    Dim antallInnkjop As Long, bekreftetInnkjop As Long
+    Dim avvikInnkjop As Long, manglendeBokforing As Long
+
+    Dim antallIB As Long, solgtIB As Long
+    Dim paLagerIB As Long, avvikIB As Long
+
+    Dim antallUB As Long, forklartUB As Long, uforklartUB As Long
 
     ws.Cells.Clear
 
-    ws.Range("A1:J1").Merge
+    '----------------------------------------------------------
+    ' Tittel og forklaring
+    '----------------------------------------------------------
+
+    ws.Range("A1:H1").Merge
     ws.Range("A1").value = ws.Name
 
     With ws.Range("A1")
@@ -1647,62 +1805,97 @@ Private Sub UpdateVarekjopControlSheet( _
 
     ws.rows(1).RowHeight = 26
 
-    ws.Range("A2:J2").Merge
+    ws.Range("A2:H2").Merge
     ws.Range("A2").value = _
-        "Kontrollregel: Alle biler OFV sier er kjopt (" & _
-        buyerOrgName & ", orgnr " & buyerOrgNo & ") i perioden " & _
+        "Kontrollregel: Innkjop i perioden (" & _
         Format$(dateFra, "dd.mm.yyyy") & " - " & _
         Format$(dateTil, "dd.mm.yyyy") & _
-        " sjekkes mot bokforingslisten (Regnr/VIN + Bokfort dato)."
+        ") sjekkes mot OFV sin kjopsliste for " & buyerOrgName & _
+        " (orgnr " & buyerOrgNo & ") i begge retninger: er bilen " & _
+        "bekreftet av OFV, og er alt OFV sier er kjopt faktisk bokfort."
 
-    ws.Range("A3:J3").Merge
+    ws.Range("A3:H3").Merge
     ws.Range("A3").value = _
-        "En bil regnes som bekreftet varekjop nar den bade er " & _
-        "bokfort OG senere avregistrert (solgt ut av bestand) av " & _
-        "samme juridiske enhet - se kolonnene KjoptDato/" & _
-        "AvregistrertDato/Avregistrert og Status."
+        "Seksjon B og C er tillegg og vises bare hvis IB- og/eller " & _
+        "UB-listen er fylt ut: biler kjopt forrige periode (IB) " & _
+        "kontrolleres da mot om de er solgt i denne perioden, og " & _
+        "biler fortsatt pa lager (UB) kontrolleres mot om de kan " & _
+        "forklares av IB eller innkjop i perioden."
 
     ws.Range("A2:A3").Font.Italic = True
     ws.rows("2:3").RowHeight = 15
 
-    For Each row In kontrollRows
+    r = 5
 
-        statusText = VariantToString(row("Status"))
+    '----------------------------------------------------------
+    ' Seksjon A - Innkjop i perioden
+    '----------------------------------------------------------
 
-        If Left$(statusText, 2) = "OK" Then
-            antallOk = antallOk + 1
-        ElseIf Left$(statusText, 5) = "Avvik" Then
-            antallAvvik = antallAvvik + 1
-        End If
+    For Each row In seksjonARows
+
+        Select Case VariantToString(row("Status"))
+
+            Case "OK - bekreftet i OFV"
+                bekreftetInnkjop = bekreftetInnkjop + 1
+                antallInnkjop = antallInnkjop + 1
+
+            Case "Avvik: ikke bekreftet av OFV i perioden"
+                avvikInnkjop = avvikInnkjop + 1
+                antallInnkjop = antallInnkjop + 1
+
+            Case "Avvik: OFV viser kjop, mangler i bokforing"
+                manglendeBokforing = manglendeBokforing + 1
+
+        End Select
 
     Next row
 
-    ws.Range("A5:B5").Merge : ws.Range("A5").value = "Inputbiler"
-    ws.Range("C5:D5").Merge : ws.Range("C5").value = "OK"
-    ws.Range("E5:F5").Merge : ws.Range("E5").value = "Avvik"
-    ws.Range("G5:J5").Merge
-    ws.Range("G5").value = "OFV-kjop uten bokforing"
+    ws.Range("A" & r & ":H" & r).Merge
+    ws.Range("A" & r).value = "A - Innkjop i perioden"
 
-    With ws.Range("A5:J5")
+    With ws.Range("A" & r)
+        .Font.Bold = True
+        .Font.Size = 12
+        .Interior.Color = RGB(221, 235, 247)
+        .HorizontalAlignment = xlLeft
+        .VerticalAlignment = xlCenter
+    End With
+
+    ws.rows(r).RowHeight = 20
+    r = r + 2
+
+    ws.Range("A" & (r - 1) & ":B" & (r - 1)).Merge
+    ws.Range("A" & (r - 1)).value = "Innkjop"
+    ws.Range("C" & (r - 1) & ":D" & (r - 1)).Merge
+    ws.Range("C" & (r - 1)).value = "Bekreftet i OFV"
+    ws.Range("E" & (r - 1) & ":F" & (r - 1)).Merge
+    ws.Range("E" & (r - 1)).value = "Avvik"
+    ws.Range("G" & (r - 1) & ":H" & (r - 1)).Merge
+    ws.Range("G" & (r - 1)).value = "OFV-kjop uten bokforing"
+
+    With ws.Range("A" & (r - 1) & ":H" & (r - 1))
         .Font.Bold = True
         .Interior.Color = RGB(221, 235, 247)
         .HorizontalAlignment = xlCenter
         .VerticalAlignment = xlCenter
     End With
 
-    ws.Range("A6:B6").Merge : ws.Range("A6").value = totalVehicles
-    ws.Range("C6:D6").Merge : ws.Range("C6").value = antallOk
-    ws.Range("E6:F6").Merge : ws.Range("E6").value = antallAvvik
-    ws.Range("G6:J6").Merge
-    ws.Range("G6").value = manglendeIBokforing.Count
+    ws.Range("A" & r & ":B" & r).Merge
+    ws.Range("A" & r).value = antallInnkjop
+    ws.Range("C" & r & ":D" & r).Merge
+    ws.Range("C" & r).value = bekreftetInnkjop
+    ws.Range("E" & r & ":F" & r).Merge
+    ws.Range("E" & r).value = avvikInnkjop
+    ws.Range("G" & r & ":H" & r).Merge
+    ws.Range("G" & r).value = manglendeBokforing
 
-    With ws.Range("A6:B6")
+    With ws.Range("A" & r & ":B" & r)
         .Font.Bold = True
         .Font.Size = 16
         .HorizontalAlignment = xlCenter
     End With
 
-    With ws.Range("C6:D6")
+    With ws.Range("C" & r & ":D" & r)
         .Font.Bold = True
         .Font.Size = 16
         .Interior.Color = COLOR_GREEN_FILL
@@ -1710,7 +1903,7 @@ Private Sub UpdateVarekjopControlSheet( _
         .HorizontalAlignment = xlCenter
     End With
 
-    With ws.Range("E6:F6")
+    With ws.Range("E" & r & ":F" & r)
         .Font.Bold = True
         .Font.Size = 16
         .Interior.Color = COLOR_RED_FILL
@@ -1718,7 +1911,7 @@ Private Sub UpdateVarekjopControlSheet( _
         .HorizontalAlignment = xlCenter
     End With
 
-    With ws.Range("G6:J6")
+    With ws.Range("G" & r & ":H" & r)
         .Font.Bold = True
         .Font.Size = 16
         .Interior.Color = COLOR_YELLOW_FILL
@@ -1726,19 +1919,16 @@ Private Sub UpdateVarekjopControlSheet( _
         .HorizontalAlignment = xlCenter
     End With
 
-    ws.rows("5:6").RowHeight = 20
+    ws.rows((r - 1) & ":" & r).RowHeight = 20
+    r = r + 2
 
-    ws.Range("A" & HEADER_ROW).value = "Regnr"
-    ws.Range("B" & HEADER_ROW).value = "Chassisnummer"
-    ws.Range("C" & HEADER_ROW).value = "Modell"
-    ws.Range("D" & HEADER_ROW).value = "Bokfort dato"
-    ws.Range("E" & HEADER_ROW).value = "I OFV-liste"
-    ws.Range("F" & HEADER_ROW).value = "Kjopt dato"
-    ws.Range("G" & HEADER_ROW).value = "Avregistrert dato"
-    ws.Range("H" & HEADER_ROW).value = "Avregistrert"
-    ws.Range("I" & HEADER_ROW).value = "Status"
+    ws.Range("A" & r).value = "Regnr/VIN"
+    ws.Range("B" & r).value = "Chassisnummer"
+    ws.Range("C" & r).value = "Modell"
+    ws.Range("D" & r).value = "I OFV-liste"
+    ws.Range("E" & r).value = "Status"
 
-    With ws.Range("A" & HEADER_ROW & ":I" & HEADER_ROW)
+    With ws.Range("A" & r & ":E" & r)
         .Font.Bold = True
         .Font.Color = RGB(255, 255, 255)
         .Interior.Color = RGB(31, 78, 120)
@@ -1748,56 +1938,284 @@ Private Sub UpdateVarekjopControlSheet( _
         .RowHeight = 30
     End With
 
-    r = FIRST_DATA_ROW
+    r = r + 1
 
-    For Each row In kontrollRows
+    For Each row In seksjonARows
 
         ws.Cells(r, 1).value = VariantToString(row("RegnrInput"))
         ws.Cells(r, 2).value = VariantToString(row("Chassisnummer"))
         ws.Cells(r, 3).value = VariantToString(row("Modell"))
-        ws.Cells(r, 4).value = row("BokfortDato")
-        ws.Cells(r, 5).value = VariantToString(row("IOFVListe"))
-        ws.Cells(r, 6).value = row("KjoptDato")
-        ws.Cells(r, 7).value = row("AvregistrertDato")
-        ws.Cells(r, 8).value = VariantToString(row("Avregistrert"))
-        ws.Cells(r, 9).value = VariantToString(row("Status"))
+        ws.Cells(r, 4).value = VariantToString(row("IOFVListe"))
+        ws.Cells(r, 5).value = VariantToString(row("Status"))
 
-        statusText = VariantToString(row("Status"))
-
-        If Left$(statusText, 2) = "OK" Then
-
-            With ws.Range(ws.Cells(r, 9), ws.Cells(r, 9))
-                .Interior.Color = COLOR_GREEN_FILL
-                .Font.Color = COLOR_GREEN_FONT
-            End With
-
-        ElseIf Left$(statusText, 5) = "Avvik" Then
-
-            With ws.Range(ws.Cells(r, 9), ws.Cells(r, 9))
-                .Interior.Color = COLOR_RED_FILL
-                .Font.Color = COLOR_RED_FONT
-            End With
-
-        End If
+        FargeleggStatusCelle ws.Cells(r, 5), VariantToString(row("Status"))
 
         r = r + 1
 
     Next row
 
-    lastRow = r - 1
-    If lastRow < FIRST_DATA_ROW Then lastRow = FIRST_DATA_ROW
+    r = r + 1
 
-    ws.Range("D" & FIRST_DATA_ROW & ":D" & lastRow).NumberFormat = _
-        "dd.mm.yyyy"
-    ws.Range("F" & FIRST_DATA_ROW & ":G" & lastRow).NumberFormat = _
-        "dd.mm.yyyy"
+    '----------------------------------------------------------
+    ' Seksjon B - IB (kjopt forrige periode). Vises bare hvis
+    ' IB-listen er fylt ut - kontrollen skal fungere helt uten
+    ' IB/UB, med kun Innkjop-listen i seksjon A.
+    '----------------------------------------------------------
+
+    If seksjonBRows.Count > 0 Then
+
+    For Each row In seksjonBRows
+
+        antallIB = antallIB + 1
+
+        If VariantToString(row("SolgtIPerioden")) = "Ja" Then
+            solgtIB = solgtIB + 1
+        ElseIf VariantToString(row("PaUBListe")) = "Ja" Then
+            paLagerIB = paLagerIB + 1
+        Else
+            avvikIB = avvikIB + 1
+        End If
+
+    Next row
+
+    ws.Range("A" & r & ":H" & r).Merge
+    ws.Range("A" & r).value = "B - IB (kjopt forrige periode)"
+
+    With ws.Range("A" & r)
+        .Font.Bold = True
+        .Font.Size = 12
+        .Interior.Color = RGB(221, 235, 247)
+        .HorizontalAlignment = xlLeft
+        .VerticalAlignment = xlCenter
+    End With
+
+    ws.rows(r).RowHeight = 20
+    r = r + 2
+
+    ws.Range("A" & (r - 1) & ":B" & (r - 1)).Merge
+    ws.Range("A" & (r - 1)).value = "IB-biler"
+    ws.Range("C" & (r - 1) & ":D" & (r - 1)).Merge
+    ws.Range("C" & (r - 1)).value = "Solgt i perioden"
+    ws.Range("E" & (r - 1) & ":F" & (r - 1)).Merge
+    ws.Range("E" & (r - 1)).value = "Fortsatt pa lager"
+    ws.Range("G" & (r - 1) & ":H" & (r - 1)).Merge
+    ws.Range("G" & (r - 1)).value = "Avvik"
+
+    With ws.Range("A" & (r - 1) & ":H" & (r - 1))
+        .Font.Bold = True
+        .Interior.Color = RGB(221, 235, 247)
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+    End With
+
+    ws.Range("A" & r & ":B" & r).Merge
+    ws.Range("A" & r).value = antallIB
+    ws.Range("C" & r & ":D" & r).Merge
+    ws.Range("C" & r).value = solgtIB
+    ws.Range("E" & r & ":F" & r).Merge
+    ws.Range("E" & r).value = paLagerIB
+    ws.Range("G" & r & ":H" & r).Merge
+    ws.Range("G" & r).value = avvikIB
+
+    With ws.Range("A" & r & ":B" & r)
+        .Font.Bold = True
+        .Font.Size = 16
+        .HorizontalAlignment = xlCenter
+    End With
+
+    With ws.Range("C" & r & ":D" & r)
+        .Font.Bold = True
+        .Font.Size = 16
+        .Interior.Color = COLOR_GREEN_FILL
+        .Font.Color = COLOR_GREEN_FONT
+        .HorizontalAlignment = xlCenter
+    End With
+
+    With ws.Range("E" & r & ":F" & r)
+        .Font.Bold = True
+        .Font.Size = 16
+        .Interior.Color = COLOR_GREEN_FILL
+        .Font.Color = COLOR_GREEN_FONT
+        .HorizontalAlignment = xlCenter
+    End With
+
+    With ws.Range("G" & r & ":H" & r)
+        .Font.Bold = True
+        .Font.Size = 16
+        .Interior.Color = COLOR_RED_FILL
+        .Font.Color = COLOR_RED_FONT
+        .HorizontalAlignment = xlCenter
+    End With
+
+    ws.rows((r - 1) & ":" & r).RowHeight = 20
+    r = r + 2
+
+    ws.Range("A" & r).value = "Regnr/VIN"
+    ws.Range("B" & r).value = "Chassisnummer"
+    ws.Range("C" & r).value = "Modell"
+    ws.Range("D" & r).value = "Solgt i perioden"
+    ws.Range("E" & r).value = "Solgt dato"
+    ws.Range("F" & r).value = "Kjoper"
+    ws.Range("G" & r).value = "Pa UB-liste"
+    ws.Range("H" & r).value = "Status"
+
+    With ws.Range("A" & r & ":H" & r)
+        .Font.Bold = True
+        .Font.Color = RGB(255, 255, 255)
+        .Interior.Color = RGB(31, 78, 120)
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+        .WrapText = True
+        .RowHeight = 30
+    End With
+
+    r = r + 1
+
+    For Each row In seksjonBRows
+
+        ws.Cells(r, 1).value = VariantToString(row("RegnrInput"))
+        ws.Cells(r, 2).value = VariantToString(row("Chassisnummer"))
+        ws.Cells(r, 3).value = VariantToString(row("Modell"))
+        ws.Cells(r, 4).value = VariantToString(row("SolgtIPerioden"))
+        ws.Cells(r, 5).value = row("SolgtDato")
+        ws.Cells(r, 5).NumberFormat = "dd.mm.yyyy"
+        ws.Cells(r, 6).value = VariantToString(row("Kjoper"))
+        ws.Cells(r, 7).value = VariantToString(row("PaUBListe"))
+        ws.Cells(r, 8).value = VariantToString(row("Status"))
+
+        FargeleggStatusCelle ws.Cells(r, 8), VariantToString(row("Status"))
+
+        r = r + 1
+
+    Next row
+
+    r = r + 1
+
+    End If
+
+    '----------------------------------------------------------
+    ' Seksjon C - UB (fortsatt pa lager). Vises bare hvis
+    ' UB-listen er fylt ut.
+    '----------------------------------------------------------
+
+    If seksjonCRows.Count > 0 Then
+
+    For Each row In seksjonCRows
+
+        antallUB = antallUB + 1
+
+        If VariantToString(row("Status")) = "OK - forklart" Then
+            forklartUB = forklartUB + 1
+        Else
+            uforklartUB = uforklartUB + 1
+        End If
+
+    Next row
+
+    ws.Range("A" & r & ":H" & r).Merge
+    ws.Range("A" & r).value = "C - UB (fortsatt pa lager)"
+
+    With ws.Range("A" & r)
+        .Font.Bold = True
+        .Font.Size = 12
+        .Interior.Color = RGB(221, 235, 247)
+        .HorizontalAlignment = xlLeft
+        .VerticalAlignment = xlCenter
+    End With
+
+    ws.rows(r).RowHeight = 20
+    r = r + 2
+
+    ws.Range("A" & (r - 1) & ":C" & (r - 1)).Merge
+    ws.Range("A" & (r - 1)).value = "UB-biler"
+    ws.Range("D" & (r - 1) & ":E" & (r - 1)).Merge
+    ws.Range("D" & (r - 1)).value = "Forklart"
+    ws.Range("F" & (r - 1) & ":H" & (r - 1)).Merge
+    ws.Range("F" & (r - 1)).value = "Uforklart"
+
+    With ws.Range("A" & (r - 1) & ":H" & (r - 1))
+        .Font.Bold = True
+        .Interior.Color = RGB(221, 235, 247)
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+    End With
+
+    ws.Range("A" & r & ":C" & r).Merge
+    ws.Range("A" & r).value = antallUB
+    ws.Range("D" & r & ":E" & r).Merge
+    ws.Range("D" & r).value = forklartUB
+    ws.Range("F" & r & ":H" & r).Merge
+    ws.Range("F" & r).value = uforklartUB
+
+    With ws.Range("A" & r & ":C" & r)
+        .Font.Bold = True
+        .Font.Size = 16
+        .HorizontalAlignment = xlCenter
+    End With
+
+    With ws.Range("D" & r & ":E" & r)
+        .Font.Bold = True
+        .Font.Size = 16
+        .Interior.Color = COLOR_GREEN_FILL
+        .Font.Color = COLOR_GREEN_FONT
+        .HorizontalAlignment = xlCenter
+    End With
+
+    With ws.Range("F" & r & ":H" & r)
+        .Font.Bold = True
+        .Font.Size = 16
+        .Interior.Color = COLOR_RED_FILL
+        .Font.Color = COLOR_RED_FONT
+        .HorizontalAlignment = xlCenter
+    End With
+
+    ws.rows((r - 1) & ":" & r).RowHeight = 20
+    r = r + 2
+
+    ws.Range("A" & r).value = "Regnr/VIN"
+    ws.Range("B" & r).value = "Chassisnummer"
+    ws.Range("C" & r).value = "Modell"
+    ws.Range("D" & r).value = "Funnet i IB"
+    ws.Range("E" & r).value = "Funnet i innkjop"
+    ws.Range("F" & r).value = "Status"
+
+    With ws.Range("A" & r & ":F" & r)
+        .Font.Bold = True
+        .Font.Color = RGB(255, 255, 255)
+        .Interior.Color = RGB(31, 78, 120)
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+        .WrapText = True
+        .RowHeight = 30
+    End With
+
+    r = r + 1
+
+    For Each row In seksjonCRows
+
+        ws.Cells(r, 1).value = VariantToString(row("RegnrInput"))
+        ws.Cells(r, 2).value = VariantToString(row("Chassisnummer"))
+        ws.Cells(r, 3).value = VariantToString(row("Modell"))
+        ws.Cells(r, 4).value = VariantToString(row("FunnetIIB"))
+        ws.Cells(r, 5).value = VariantToString(row("FunnetIInnkjop"))
+        ws.Cells(r, 6).value = VariantToString(row("Status"))
+
+        FargeleggStatusCelle ws.Cells(r, 6), VariantToString(row("Status"))
+
+        r = r + 1
+
+    Next row
+
+    End If
 
     ws.Columns("A").ColumnWidth = 14
     ws.Columns("B").ColumnWidth = 22
     ws.Columns("C").ColumnWidth = 18
-    ws.Columns("D:G").ColumnWidth = 16
-    ws.Columns("H").ColumnWidth = 14
-    ws.Columns("I").ColumnWidth = 34
+    ws.Columns("D").ColumnWidth = 16
+    ws.Columns("E").ColumnWidth = 16
+    ws.Columns("F").ColumnWidth = 25
+    ws.Columns("G").ColumnWidth = 14
+    ws.Columns("H").ColumnWidth = 34
 
 End Sub
 
@@ -4249,8 +4667,88 @@ Private Function BuyerCountyHeader() As String
 End Function
 
 
+' Leser en identifikatorliste der regnr og VIN star blandet i SAMME
+' kolonne (en bil per rad) - til en Dictionary nokkel->Array(regNo, vin).
+' Brukes av Innkjop-, IB- og UB-listene i Varekjop bruktbil, i motsetning
+' til de andre kontrollene som har regnr og VIN i to egne nabokolonner
+' (se ReadInputIdentifier under).
+Private Function ReadIdentifikatorListe( _
+    ByVal ws As Worksheet, _
+    ByVal firstRow As Long, _
+    ByVal col As Long) As Object
+
+    Dim resultat As Object
+    Dim lastRow As Long
+    Dim r As Long
+    Dim verdi As String
+    Dim regNo As String
+    Dim vin As String
+    Dim key As String
+
+    Set resultat = CreateObject("Scripting.Dictionary")
+    resultat.CompareMode = vbTextCompare
+
+    lastRow = WorksheetFunction.Max( _
+        ws.Cells(ws.rows.Count, col).End(xlUp).row, firstRow - 1)
+
+    For r = firstRow To lastRow
+
+        verdi = NormalizeIdentifier(ws.Cells(r, col).value)
+        regNo = vbNullString
+        vin = vbNullString
+
+        If Len(verdi) > 0 Then
+            If ErVIN(verdi) Then
+                vin = verdi
+            Else
+                regNo = verdi
+            End If
+        End If
+
+        key = BuildVehicleKey(vin, regNo)
+
+        If Len(key) > 0 Then
+            If Not resultat.Exists(key) Then
+                resultat.Add key, Array(regNo, vin)
+            End If
+        End If
+
+    Next r
+
+    Set ReadIdentifikatorListe = resultat
+
+End Function
+
+
+' Sjekker om en normalisert regnr eller VIN finnes i en av
+' Innkjop/IB/UB-listene (dictionary bygget av ReadIdentifikatorListe),
+' uten a maatte skanne verdiene - samme nokkelformat som listen selv.
+Private Function FinnesIListe( _
+    ByVal liste As Object, _
+    ByVal regNorm As String, _
+    ByVal vinNorm As String) As Boolean
+
+    If Len(vinNorm) > 0 Then
+        If liste.Exists(BuildVehicleKey(vinNorm, vbNullString)) Then
+            FinnesIListe = True
+            Exit Function
+        End If
+    End If
+
+    If Len(regNorm) > 0 Then
+        If liste.Exists(BuildVehicleKey(vbNullString, regNorm)) Then
+            FinnesIListe = True
+            Exit Function
+        End If
+    End If
+
+    FinnesIListe = False
+
+End Function
+
+
 ' Leser ett kjoretoy-input fra en av to nabokolonner (Regnr/VIN) - kun
-' en av de to fylles ut per rad. Brukes av alle tre kontrollene, som
+' en av de to fylles ut per rad. Brukes av Kontroll 1 og Kontroll 3, som
 ' hver har sitt eget kolonnepar for dette pa Input-arket.
 Private Function ReadInputIdentifier( _
     ByVal ws As Worksheet, _
