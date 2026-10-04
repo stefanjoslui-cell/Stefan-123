@@ -31,7 +31,8 @@ Option Explicit
 '   Kontroll 3 - "Kontroll Demobil" (kolonne J-L):
 '     K8         = Juridisk enhet - organisasjonsnummer
 '     K9 / K10   = Dato fra / Dato til
-'     J12 og ned = Regnr, K12 og ned = VIN
+'     J12 og ned = Regnr/VIN blandet i samme kolonne (kolonne K er
+'                  ikke i bruk som liste - bare K8/K9/K10 over)
 '     L12 og ned = Bokfort inn dato
 '
 ' - OFV Transactions API er eneste datakilde for eierskiftehistorikk.
@@ -92,8 +93,7 @@ Private Const ORG_CELL_3 As String = "K8"
 Private Const DATOFRA_CELL_3 As String = "K9"
 Private Const DATOTIL_CELL_3 As String = "K10"
 Private Const FIRST_ROW_3 As Long = 12
-Private Const COL_REGNR_3 As Long = 10   ' J
-Private Const COL_VIN_3 As Long = 11     ' K
+Private Const COL_IDENT_3 As Long = 10   ' J (regnr/VIN blandet)
 Private Const COL_BOKFORT_3 As Long = 12 ' L (Bokfort inn dato)
 
 ' Bekreftet via "Try it"-konsollen i Azure APIM-portalen
@@ -2604,16 +2604,19 @@ Private Sub KjorKontrollDemobil()
     dateFraRaw = TolkBokfortDato(wsInput.Range(DATOFRA_CELL_3).value)
     dateTilRaw = TolkBokfortDato(wsInput.Range(DATOTIL_CELL_3).value)
 
-    lastInputRow = LastRowInEitherColumn( _
-        wsInput, FIRST_ROW_3, COL_REGNR_3, COL_VIN_3)
+    ' Regnr/VIN star blandet i samme kolonne (J) - samme auto-
+    ' deteksjon pa lengde (17 tegn = VIN) som Innkjop-listen i
+    ' Varekjop Bruktbil.
+    lastInputRow = WorksheetFunction.Max( _
+        wsInput.Cells(wsInput.rows.Count, COL_IDENT_3).End(xlUp).row, _
+        FIRST_ROW_3 - 1)
 
     Set queue = CreateObject("Scripting.Dictionary")
     queue.CompareMode = vbTextCompare
 
     For r = FIRST_ROW_3 To lastInputRow
 
-        inputIdent = ReadInputIdentifier( _
-            wsInput, r, COL_REGNR_3, COL_VIN_3)
+        inputIdent = NormalizeIdentifier(wsInput.Cells(r, COL_IDENT_3).value)
 
         regNo = vbNullString
         vin = vbNullString
