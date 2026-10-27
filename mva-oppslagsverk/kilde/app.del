@@ -394,7 +394,7 @@ const SAMMENDRAG = {
   s4: ['Utleie under 30 dager, elektrisk', 'Utleien faktureres med mva (25 %). Ikke fradragsrett ved bruk til verksted eller demobil.'],
   s5: ['Utleie av varebil klasse 2', 'Utleien faktureres med mva (25 %). Brukes den som demobil: egne regler med fradragsrett.'],
   s6: ['Demobil, personkjøretøy', 'Uttaksmva i eget selskap. Forhandler har ikke fradragsrett.'],
-  s7: ['Demobil, varebil klasse 2', 'Uttaksmva beregnes i eget selskap (egne regler for elbil). Forhandler har ikke fradragsrett.'],
+  s7: ['Demobil, varebil klasse 2', 'Ingen uttaksmva. Forhandler har fradragsrett.'],
   s8: ['Firmabil hos forhandler / Bauda', 'Utleien faktureres etter reglene i scenario 1. Uttaksmva beregnes i eget selskap, og forhandler har ikke fradragsrett.']
 };
 const sel = {};
