@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="nb"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rediger MVA-oppslagsverk</title>
+<style>
+:root{--bl:#1F3A93;--rod:#E3243A;--gra:#5b6472;--lin:#d5dae3;--bg:#f4f6fa}
+*{box-sizing:border-box}body{margin:0;font:15px/1.45 system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:#1c2430}
+header{position:sticky;top:0;z-index:5;background:#fff;border-bottom:3px solid var(--rod);padding:10px 20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+header h1{font-size:18px;margin:0 auto 0 0;color:var(--bl)}
+button,select{font:inherit}button{border:1px solid var(--bl);background:#fff;color:var(--bl);border-radius:6px;padding:6px 12px;cursor:pointer}
+button.p{background:var(--bl);color:#fff}button:hover{filter:brightness(.95)}button.x{border-color:var(--lin);color:var(--rod);padding:2px 8px}
+main{max-width:980px;margin:0 auto;padding:16px 20px 80px}
+.hjelp{background:#fff;border:1px solid var(--lin);border-radius:8px;padding:10px 14px;color:var(--gra);margin-bottom:16px}
+details{background:#fff;border:1px solid var(--lin);border-radius:8px;margin:10px 0}
+summary{cursor:pointer;padding:10px 14px;font-weight:600;color:var(--bl)}
+.in{padding:4px 14px 14px}h3{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--gra);margin:14px 0 6px}
+.avs{border-left:3px solid var(--lin);padding:6px 0 6px 10px;margin:6px 0}
+.run{display:flex;gap:6px;align-items:flex-start;margin:4px 0}
+textarea,input[type=text]{width:100%;border:1px solid var(--lin);border-radius:6px;padding:6px 8px;font:inherit;resize:vertical}
+.run textarea{min-height:38px;flex:1}.run select{width:92px}.run label{white-space:nowrap;font-size:13px;color:var(--gra)}
+.f-rod textarea{color:var(--rod)}.f-bla textarea{color:#1d5fd1}
+#msg{color:var(--gra);font-size:13px}
+</style></head><body>
+<header><h1>Rediger MVA-oppslagsverk</h1><span id="msg"></span>
+<button id="apne">Åpne lagret redigering…</button><button id="json">Lagre redigering (.json)</button><button class="p" id="html">Last ned ny MVA-oppslagsverk.html</button>
+<input type="file" id="fil" accept=".json,application/json" hidden></header>
+<main><div class="hjelp">Endre teksten i feltene under. En tekstbit kan ha egen farge (svart / rød / blå) og være <b>fet</b>. Trykk <b>Last ned ny MVA-oppslagsverk.html</b> når du er ferdig: filen erstatter den gamle og virker likt. Endringene lagres ikke automatisk. Bruk <b>Lagre redigering</b> hvis du vil fortsette senere. Hvilke spørsmål/valg et scenario hører til endres ikke her.</div>
+<div id="ed"></div></main>
+<script>
+const MAL=%%MAL%%;
+let D=%%DATA%%;
+const $=s=>document.querySelector(s);
+const el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.textContent=h;return e};
+const msg=t=>{$('#msg').textContent=t;setTimeout(()=>{if($('#msg').textContent===t)$('#msg').textContent=''},4000)};
+function runEd(list,i,rer){const r=list[i];const w=el('div','run f-'+r.farge);
+  const ta=el('textarea');ta.value=r.tekst;ta.rows=Math.max(1,Math.ceil(r.tekst.length/90));ta.oninput=()=>{r.tekst=ta.value};
+  const sel=el('select');[['sort','Svart'],['rod','Rød'],['bla','Blå']].forEach(([v,t])=>{const o=el('option',null,t);o.value=v;sel.append(o)});sel.value=r.farge;sel.onchange=()=>{r.farge=sel.value;w.className='run f-'+r.farge};
+  const l=el('label');const cb=el('input');cb.type='checkbox';cb.checked=!!r.fet;cb.onchange=()=>{if(cb.checked)r.fet=true;else delete r.fet};l.append(cb,' Fet');
+  const x=el('button','x','×');x.title='Slett tekstbit';x.onclick=()=>{list.splice(i,1);rer()};
+  w.append(ta,sel,l,x);return w}
+function runsEd(list,rer,tom){const w=el('div');list.forEach((_,i)=>w.append(runEd(list,i,rer)));
+  const b=el('button',null,'+ tekstbit');b.onclick=()=>{list.push({tekst:'',farge:'sort'});rer()};w.append(b);return w}
+function felt(tittel,list,rer,sub){const f=el('div');f.append(el('h3',null,tittel));f.append(runsEd(list,rer));return f}
+function avsEd(tittel,paras,rer){const f=el('div');f.append(el('h3',null,tittel));
+  paras.forEach((p,i)=>{const a=el('div','avs');a.append(runsEd(p,rer));const x=el('button','x','Slett avsnitt');x.onclick=()=>{paras.splice(i,1);rer()};a.append(x);f.append(a)});
+  const b=el('button',null,'+ avsnitt');b.onclick=()=>{paras.push([{tekst:'',farge:'sort'}]);rer()};f.append(b);return f}
+function render(){const root=$('#ed');const open=[...root.querySelectorAll('details')].map(d=>d.open);root.innerHTML='';
+  const rer=()=>render();
+  const top=el('details');top.append(el('summary',null,'Tittel'));const ti=el('div','in');
+  [['tittel','Tittel'],['undertittel','Undertittel']].forEach(([k,t])=>{ti.append(el('h3',null,t));const i=el('input');i.type='text';i.value=D[k];i.oninput=()=>{D[k]=i.value};ti.append(i)});top.append(ti);root.append(top);
+  D.scenarioer.forEach(s=>{const d=el('details');d.append(el('summary',null,'Scenario '+s.nr+': '+s.problemstilling.map(r=>r.tekst).join('')));const b=el('div','in');
+    b.append(felt('Problemstilling (overskrift)',s.problemstilling,rer));
+    if(s.problemstilling_tillegg)b.append(felt('Tillegg til overskrift',s.problemstilling_tillegg,rer));
+    b.append(avsEd('Konklusjon / mva-behandling',s.konklusjon,rer));
+    if(s.fotnote)b.append(felt('Fotnote',s.fotnote,rer));
+    d.append(b);root.append(d)});
+  const y=el('details');y.append(el('summary',null,'Yrkesmessig utleie'));const yb=el('div','in');
+  yb.append(felt('Tittel',D.yrkesmessig_utleie.tittel,rer));yb.append(avsEd('Avsnitt (første tekstbit er overskriften i kortet)',D.yrkesmessig_utleie.avsnitt,rer));y.append(yb);root.append(y);
+  [...root.querySelectorAll('details')].forEach((d,i)=>{if(open[i])d.open=true})}
+function last(navn,type,tekst){const a=el('a');a.href=URL.createObjectURL(new Blob([tekst],{type}));a.download=navn;document.body.append(a);a.click();a.remove()}
+function rens(){D.scenarioer.forEach(s=>{delete s.fotnote_intern;delete s.intern_merknad});return JSON.stringify(D)}
+$('#html').onclick=()=>{const j=rens().replace(/<\//g,'<\\/');last('MVA-oppslagsverk.html','text/html',MAL.split('__DATA__').join(j));msg('Lastet ned MVA-oppslagsverk.html')};
+$('#json').onclick=()=>{last('redigering.json','application/json',JSON.stringify(D,null,1));msg('Lagret redigering.json')};
+$('#apne').onclick=()=>$('#fil').click();
+$('#fil').onchange=async e=>{try{const d=JSON.parse(await e.target.files[0].text());if(!d.scenarioer||!d.yrkesmessig_utleie)throw 0;D=d;render();msg('Åpnet')}catch(_){msg('Ugyldig fil')}};
+render();
+</script></body></html>

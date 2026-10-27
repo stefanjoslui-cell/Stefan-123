@@ -1,0 +1,37 @@
+<!doctype html><html lang="nb"><meta charset="utf-8"><title>Bauda-tema – palett</title>
+<link rel="stylesheet" href="bauda-tema.css">
+<style>
+body{font-family:var(--font);color:var(--text);margin:0;padding:48px;background:var(--paper);line-height:var(--lh-body)}
+h1,h2{font-weight:var(--fw-heading);color:var(--ink);letter-spacing:var(--ls-heading);margin:0 0 16px}
+h1{font-size:44px} h2{font-size:26px;margin-top:48px}
+.sw{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:16px}
+.c{border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden;font-size:13px}
+.c i{display:block;height:80px}.c div{padding:10px}.c b{display:block;font-size:14px}
+.lab{text-transform:uppercase;letter-spacing:var(--ls-label);font-size:13px;color:var(--navy)}
+.btn{font:inherit;text-transform:uppercase;letter-spacing:var(--ls-label);font-size:13px;padding:12px 22px;border:1px solid var(--ink);background:none;color:var(--ink);border-radius:var(--r-sm)}
+.pill{display:inline-block;font-size:13px;padding:5px 12px;border:1px solid var(--line);border-radius:var(--r-pill);margin-right:8px}
+.card{border:1px solid var(--line);padding:24px;max-width:520px;border-radius:var(--r-sm)}
+.nav{background:var(--navy);color:#fff;padding:24px;max-width:520px}
+</style>
+<h1>Bauda-tema</h1><p>Hentet fra rapporten. Ett felles tema for alle fem varianter.</p>
+<h2>Farger</h2><div class="sw">
+<div class="c"><i style="background:var(--navy)"></i><div><b>Navy</b>#032A3F · hovedfarge</div></div>
+<div class="c"><i style="background:var(--toyota)"></i><div><b>Toyota-rød</b>#B5121B · aksent</div></div>
+<div class="c"><i style="background:var(--lexus)"></i><div><b>Lexus-gull</b>#9C7A3C · sekundær</div></div>
+<div class="c"><i style="background:var(--ink)"></i><div><b>Ink</b>#2E2113 · overskrifter</div></div>
+<div class="c"><i style="background:var(--text)"></i><div><b>Tekst</b>#2B2B2B</div></div>
+<div class="c"><i style="background:var(--muted)"></i><div><b>Dempet</b>#6B6560</div></div>
+<div class="c"><i style="background:var(--line)"></i><div><b>Linje</b>#DCDAD7</div></div>
+<div class="c"><i style="background:var(--light)"></i><div><b>Lys</b>#EDEDED</div></div>
+<div class="c"><i style="background:var(--open)"></i><div><b>Åpen/advarsel</b>#F2A31B</div></div>
+<div class="c"><i style="background:var(--ok)"></i><div><b>OK</b>#3E8E41</div></div>
+<div class="c"><i style="background:var(--pp-rod)"></i><div><b>PP rød tekst</b>#B5121B</div></div>
+<div class="c"><i style="background:var(--pp-bla)"></i><div><b>PP blå tekst</b>#0070C0</div></div>
+</div>
+<h2>Typografi</h2>
+<p style="font-size:44px;font-weight:300;color:var(--ink);margin:0">Overskrift lett (300)</p>
+<p>Brødtekst 18 px / 1,55 i ToyotaType, med Segoe UI som reserve. <span class="lab">Etikett med store bokstaver</span></p>
+<h2>Elementer</h2>
+<p><button class="btn">Eksporter til PDF</button> <span class="pill">Over 30 dager</span><span class="pill">Elektrisk</span></p>
+<div class="card"><span class="lab">Scenario 1</span><h2 style="margin-top:8px;font-size:22px">Bilen leies ut som utleiebil</h2>Hjørner 2 px, tynne linjer, ingen skygger.</div>
+<div class="nav" style="margin-top:16px">Mørk flate i navy for forside og navigasjon</div>

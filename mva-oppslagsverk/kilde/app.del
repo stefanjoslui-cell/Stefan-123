@@ -1,0 +1,733 @@
+<!--CSS-->
+/* Rutenett: sidebar 272 + canvas fluid (maks 1240). Beslutningspanel: sporlinje (brikker) over tre spørsmålsrader. Rader: 48 | 5fr | 7fr | 2.5rem. */
+:root{
+  color-scheme:light dark;
+  --navy:#032A3F; --blaa:#7fb4d6;
+  --ground:#f3f5f8; --surface:#fff; --active:#e8ecf0; --border:#e1e5ea; --rule:#edf0f3; --control:#c9d0d8; --hover:#f7f9fb;
+  --text:#2B2B2B; --muted:#586069; --faint:#6a727b;
+  --primary:#032A3F; --on-primary:#fff; --data:#B5121B; --focus:#032A3F; --ink:#10222d;
+  --tint:#e7f0f6; --tint-b:#c3d9e7; --radius:10px; --radius-s:6px; --t-fast:.14s; --t-med:.24s; --ease:cubic-bezier(.2,.7,.2,1);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --navy:#02202f; --ground:#0a1118; --surface:#111a23; --active:#1b2733; --border:#22303d; --rule:#1a2530; --control:#34444f; --hover:#16212b;
+    --text:#e4e8ec; --muted:#a0aab4; --faint:#8f9aa5;
+    --primary:#e8eef2; --on-primary:#0a1118; --data:#ff6b73; --focus:#e8eef2; --ink:#f1f5f8;
+    --pp-rod:#ff7a80; --pp-bla:#6db3ff;
+    --tint:#0d2130; --tint-b:#26475d;
+  }
+}
+@media (prefers-contrast:more){:root{--border:#7a838d;--rule:#aeb5bd;--control:#566069;--muted:#2f353b;--faint:#2f353b}}
+*{box-sizing:border-box}
+button,input{font-family:inherit;font-size:inherit;color:inherit}
+h1,h2,h3{margin:0;line-height:1.2}
+p{margin:0 0 .75em}
+body{margin:0;font-family:var(--font);background:var(--ground);font-size:.875rem;line-height:1.5;color:var(--text);-webkit-font-smoothing:antialiased;text-size-adjust:100%}
+.tall{font-variant-numeric:tabular-nums}
+button,label{cursor:pointer}
+button{touch-action:manipulation}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
+#app{display:grid;grid-template-columns:272px minmax(0,1fr);min-height:100vh}
+
+/* ---------- Sidebar ---------- */
+.sb{position:sticky;top:0;height:100vh;overflow:auto;background:var(--navy);color:#fff;padding:1.25rem 1rem 1rem;display:flex;flex-direction:column;gap:1.1rem}
+.merke{display:flex;align-items:center;gap:1rem;padding:0 .5rem}
+.ord{font-size:1.85rem;font-weight:300;letter-spacing:-.02em;line-height:1}
+.ord i{display:inline-block;width:.2em;height:.2em;border-radius:50%;background:var(--blaa);margin-left:.07em}
+.strek{align-self:stretch;width:1px;min-height:1.7rem;background:rgba(255,255,255,.26)}
+.bdo{display:flex;align-items:center;background:#fff;border-radius:9px;padding:.34rem .62rem}
+.bdo svg{display:block;height:22px;width:auto}
+.tittel-sb{padding:0 .5rem;margin-top:-.65rem;font-size:.9375rem;font-weight:500;letter-spacing:.005em;color:#fff}
+.omr{margin:0 .5rem;padding:.1rem 0 .1rem .85rem;border-left:2px solid rgba(255,255,255,.22);font-size:.75rem;color:rgba(255,255,255,.62);display:grid;gap:1px}
+.omr strong{font-weight:600;color:#fff;font-size:.875rem}
+.sb nav{display:grid;gap:3px;margin-top:-.15rem}
+.sb nav a{display:flex;align-items:center;gap:.7rem;min-height:40px;padding:0 .7rem 0 .75rem;border-radius:10px;color:rgba(255,255,255,.82);text-decoration:none;font-size:.9375rem;transition:background var(--t-fast),color var(--t-fast)}
+.sb nav a svg{flex:none;opacity:.8}
+.sb nav a span{flex:1}
+.sb nav a:hover{background:rgba(255,255,255,.08);color:#fff}
+.sb nav a[aria-current=page]{background:#fff;color:#032A3F;font-weight:600}
+.sb nav a[aria-current=page] svg{opacity:1}
+.sb nav a small{font-size:.75rem;line-height:1;padding:.25rem .5rem;border-radius:999px;background:rgba(255,255,255,.14);color:rgba(255,255,255,.9)}
+.sb nav a[aria-current=page] small{background:rgba(3,42,63,.1);color:#032A3F}
+.sb :focus-visible{outline-color:#fff}
+.meny{display:none}
+
+/* ---------- Levende tre i margen. Hele treet er en knapp som nullstiller valgene ---------- */
+.tre{flex:1 1 auto;min-height:190px;max-height:320px;display:flex;align-items:center;justify-content:center;width:100%;padding:0;border:0;border-radius:12px;background:transparent;color:#fff;cursor:default;user-select:none}
+.tre svg{width:100%;height:100%;overflow:visible;pointer-events:none}
+.tre[data-aktiv]{cursor:pointer;transition:background var(--t-fast)}
+.tre[data-aktiv]:hover{background:rgba(255,255,255,.05)}
+.tre[data-aktiv]:active{background:rgba(255,255,255,.09)}
+.tre .gh{fill:none;stroke:rgba(255,255,255,.09);stroke-width:1}
+.tre .lv{fill:none;stroke:url(#trg);stroke-width:1.25;stroke-linecap:round;stroke-dasharray:var(--len);stroke-dashoffset:0;transition:stroke-dashoffset .9s cubic-bezier(.3,.7,.2,1),stroke-width .4s,opacity .4s}
+.tre .lv.av{stroke-dashoffset:var(--len)}
+.tre.fo .lv:not(.f){opacity:.2}
+.tre .lv.f{stroke:#fff;stroke-width:1.9}
+.tre .nd circle.k{fill:#bfe0f2;opacity:.95;transition:opacity .5s}
+.tre .nd.av circle.k{opacity:0}
+.tre .nd circle.rg{fill:none;stroke:#fff;stroke-width:1;opacity:0;transform-box:fill-box;transform-origin:center}
+.tre .nd.valgt circle.rg{opacity:.7;animation:puls 2.8s ease-out infinite}
+.tre .nd.valgt circle.k{fill:#fff}
+@keyframes puls{0%{transform:scale(.6);opacity:.8}100%{transform:scale(1.8);opacity:0}}
+.tre .lf circle.g{fill:rgba(255,255,255,.12);transition:r .5s}
+.tre .lf circle.p{fill:#fff;transition:opacity .5s,r .5s;filter:drop-shadow(0 0 3px rgba(127,180,214,.95))}
+.tre .lf.av circle.p{opacity:0;r:0}
+.tre .lf.f circle.p{r:4.6}
+.tre .lf:not(.av) circle.p{animation:ande 4.4s ease-in-out infinite}
+@keyframes ande{50%{opacity:.65}}
+.tre .rot{fill:#bfe0f2}
+.tre .rotglod{fill:url(#rg)}
+.tre .pt{opacity:1;transition:opacity .6s}
+.tre .pt circle{fill:#fff;filter:drop-shadow(0 0 2.5px #9fd2f0)}
+.tre .pt circle.ha{fill:#9fd2f0;opacity:.28;filter:none}
+.tre .pt.av{opacity:0}
+.tre.fo .pt:not(.f){opacity:.15}
+/* indikatorer i margen til venstre */
+.tre .niv text{font-size:11px;fill:rgba(255,255,255,.5);letter-spacing:.01em;transition:fill .4s;font-family:inherit}
+.tre .niv .pip{fill:none;stroke:rgba(255,255,255,.4);stroke-width:1;transition:fill .4s,stroke .4s}
+.tre .niv.har text{fill:#fff;font-weight:600}
+.tre .niv.har .pip{fill:#fff;stroke:#fff}
+.tre .niv .strek{stroke:rgba(255,255,255,.08);stroke-width:1;stroke-dasharray:2 3}
+.tre .endelab text{font-size:11px;fill:rgba(255,255,255,.62);font-family:inherit;transition:fill .4s,opacity .4s}
+.tre .endelab.av text{opacity:.28}
+.tre .endelab.f text{fill:#fff}
+.tre.fo .endelab:not(.f) text{opacity:.25}
+.tre .lv.av.f{stroke-dashoffset:0}
+.tre .lf.av.f circle.p{opacity:1;r:4}
+.tre .pt.av.f{opacity:1}
+.tre-reset{align-self:stretch;margin:.35rem .5rem 0;min-height:36px;border:1px solid rgba(255,255,255,.35);border-radius:8px;background:transparent;color:#fff;font-size:.8125rem;font-weight:500;transition:background var(--t-fast),border-color var(--t-fast),opacity var(--t-fast),transform var(--t-fast)}
+.tre-reset:hover:not(:disabled){background:rgba(255,255,255,.12);border-color:#fff}
+.tre-reset:active:not(:disabled){transform:scale(.98)}
+.tre-reset:disabled{opacity:.35;cursor:default}
+.sb-eks{display:grid;gap:.5rem;padding:0 .5rem}
+.sb-eks .kn{width:100%}
+.sb :focus-visible{outline-color:#fff}
+@media (max-width:900px){.tre-reset,.sb-eks{display:none}.sb.apen .sb-eks{display:grid;margin-top:1rem}}
+@media (max-width:900px){.tre{display:none}}
+@media (prefers-reduced-motion:reduce){.tre .pt{display:none}.tre .nd.valgt circle.rg,.tre .lf:not(.av) circle.p{animation:none!important}.tre .nd.valgt circle.rg{opacity:.7}}
+
+/* ---------- Yrkesmessig utleie i margen + svak glød for det som eksporteres ---------- */
+.sb-yrk{padding:0 .5rem}
+.sb-yrk-t{display:block;font-size:.6875rem;color:rgba(255,255,255,.55);margin:0 0 .4rem}
+.sb-yrk-r{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.35rem}
+.yb{display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;gap:.3rem;min-height:56px;padding:.45rem .45rem .4rem;border:1px solid rgba(255,255,255,.22);border-radius:8px;background:rgba(255,255,255,.04);color:rgba(255,255,255,.85);font-size:.6875rem;line-height:1.2;text-align:left;transition:box-shadow .3s var(--ease),border-color .3s,background .3s,color .3s}
+.yb svg{opacity:.85}
+.yb:hover{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.6);color:#fff}
+.yb.pdf{border-color:rgba(159,210,240,.7);background:rgba(159,210,240,.08);box-shadow:0 0 12px rgba(127,180,214,.28)}
+.yb.glod{border-color:#bfe0f2;background:rgba(159,210,240,.16);box-shadow:0 0 0 1px rgba(191,224,242,.6),0 0 20px rgba(127,180,214,.6);color:#fff}
+.brikke{transition:box-shadow .3s var(--ease),background var(--t-med) var(--ease),color var(--t-med) var(--ease),border-color var(--t-med) var(--ease),transform var(--t-med) var(--ease),opacity var(--t-med)}
+@media (max-width:900px){.sb-yrk{display:none}.sb.apen .sb-yrk{display:block;margin-top:1rem}}
+@media (prefers-reduced-motion:reduce){.yb{transition:none}}
+
+/* ---------- Canvas ---------- */
+main{padding:1.5rem 2rem 5rem;min-width:0;max-width:1240px;width:100%}
+.visn-side[hidden]{display:none}
+.hero{position:relative;overflow:hidden;border-radius:14px;min-height:290px;display:flex;align-items:flex-end;color:#fff;background:var(--navy);isolation:isolate}
+.hero img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:62% 60%;z-index:-2}
+.hero::before{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(90deg,rgba(3,42,63,.94) 0%,rgba(3,42,63,.82) 34%,rgba(3,42,63,.15) 70%,rgba(3,42,63,0) 100%)}
+.hero-in{padding:2rem 2.25rem;max-width:620px}
+.hero.liten{min-height:0}
+.hero.liten::before{background:none}
+.hero h1{font-size:2.5rem;font-weight:300;letter-spacing:-.02em;color:#fff}
+.sub{margin:.6rem 0 0;font-size:1rem;color:rgba(255,255,255,.85);max-width:46ch;text-wrap:pretty}
+.hand{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1.5rem}
+.kn{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 1.1rem;border:1px solid rgba(255,255,255,.55);background:transparent;color:#fff;border-radius:var(--radius-s);font-size:.875rem;font-weight:500;transition:background var(--t-fast),color var(--t-fast),border-color var(--t-fast),transform var(--t-fast)}
+.kn:hover{background:rgba(255,255,255,.14);border-color:#fff}
+.kn:active{transform:scale(.98)}
+.kn.prim{background:#fff;border-color:#fff;color:#032A3F}
+.kn.prim:hover{background:#e9f1f6}
+.hero :focus-visible{outline-color:#fff}
+
+/* ---------- Lys i bildet: helt mørkt, så bilens lys, så lyset bak bilen. Ca. 2,5 s totalt, uten blinking. ---------- */
+.hero img{filter:brightness(0)}
+.hero svg.lys{position:absolute;inset:0;width:100%;height:100%;z-index:-2;mix-blend-mode:screen;pointer-events:none}
+.lys .l-vegg,.lys .l-gulv,.lys .l-front,.lys .l-bak{opacity:0}
+.hero.paa img{animation:belys 2.4s cubic-bezier(.4,.05,.25,1) .1s forwards}
+.hero.paa .lys .l-front{animation:lysInn .7s ease-in-out .1s forwards}
+.hero.paa .lys .l-bak{animation:lysInn .7s ease-in-out .3s forwards}
+.hero.paa .lys .l-vegg{animation:lysInn 1.5s cubic-bezier(.35,.05,.3,1) .85s forwards}
+.hero.paa .lys .l-gulv{animation:lysInn 1.5s cubic-bezier(.35,.05,.3,1) 1s forwards}
+@keyframes belys{0%,28%{filter:brightness(0)}100%{filter:brightness(1)}}
+@keyframes lysInn{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.hero img{filter:none}.lys .l-vegg,.lys .l-gulv,.lys .l-front,.lys .l-bak{opacity:1;animation:none!important}.hero.paa img{animation:none}}
+@media (max-width:900px){.hero svg.lys{height:62%}}
+
+/* ---------- Beslutningspanel ---------- */
+.beslut{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-top:1.25rem;overflow:hidden}
+.merknad{margin:0;padding:.7rem 1.5rem;background:var(--active);font-size:.8125rem;color:var(--text)}
+.spor{display:flex;justify-content:space-between;align-items:center;gap:1.5rem 2.5rem;flex-wrap:wrap;padding:1.5rem 1.5rem 1.25rem}
+.status{display:flex;align-items:center;gap:1rem;min-width:0}
+.stor{font-size:3.25rem;font-weight:300;line-height:1;color:var(--data);font-variant-numeric:tabular-nums;min-width:1ch;text-align:center}
+.stor.tikk{animation:tikk .28s var(--ease)}
+@keyframes tikk{from{opacity:.15;transform:translateY(8px) scale(.94)}}
+.tekst{font-size:1.125rem;color:var(--ink);font-weight:500}
+.tekst small{display:block;font-size:.8125rem;font-weight:400;color:var(--muted);margin-top:2px;max-width:34ch}
+.brikker{display:flex;gap:1.75rem;flex-wrap:wrap}
+.grp{display:grid;gap:.6rem}
+.grp-t{display:flex;align-items:center;justify-content:center;min-height:36px;padding:0 1rem;border:0;border-radius:8px;background:var(--active);color:var(--ink);font-size:.875rem;font-weight:600;letter-spacing:.005em;transition:background var(--t-fast),color var(--t-fast),transform var(--t-fast)}
+.grp-t:hover{background:var(--control)}
+.grp-t:active{transform:scale(.98)}
+.grp-t[aria-pressed=true],.grp-t[aria-pressed=true]:hover{background:var(--primary);color:var(--on-primary)}
+.grp-b{display:flex;gap:.45rem;flex-wrap:wrap}
+.brikke{width:46px;height:46px;border-radius:10px;border:1.5px solid #032A3F;background:#032A3F;color:#fff;font-size:1.125rem;font-weight:500;font-variant-numeric:tabular-nums;display:flex;align-items:center;justify-content:center;transition:background var(--t-med) var(--ease),color var(--t-med) var(--ease),border-color var(--t-med) var(--ease),transform var(--t-med) var(--ease),opacity var(--t-med)}
+@media (prefers-color-scheme:dark){.brikke{background:var(--primary);border-color:var(--primary);color:var(--on-primary)}}
+.brikke:hover:not([data-t=borte]){transform:translateY(-2px)}
+.brikke[data-t=borte]{background:transparent;color:var(--faint);border:1.5px dashed var(--control);transform:scale(.88);cursor:default;opacity:.8}
+.q{display:grid;grid-template-columns:230px minmax(0,1fr);gap:.75rem 1.5rem;padding:1.15rem 1.5rem;border-top:1px solid var(--rule);align-items:start}
+.q h2{font-size:.9375rem;font-weight:600;color:var(--ink);padding-top:.55rem}
+.alt{display:flex;flex-wrap:wrap;gap:.5rem}
+.alt button{display:inline-flex;align-items:center;gap:.6rem;text-align:left;padding:.5rem .85rem .5rem .65rem;min-height:42px;border:1px solid var(--control);background:var(--surface);border-radius:999px;font-size:.875rem;line-height:1.3;color:var(--text);transition:background var(--t-fast),border-color var(--t-fast),transform var(--t-fast),color var(--t-fast)}
+.alt button .l{display:flex;align-items:center;gap:.5rem}
+.alt button .l::before{content:"";flex:none;width:14px;height:14px;border:1.5px solid var(--control);border-radius:50%;transition:background var(--t-fast),border-color var(--t-fast)}
+.alt button .n{font-size:.75rem;color:var(--muted);background:var(--active);border-radius:999px;min-width:1.5rem;height:1.25rem;display:inline-flex;align-items:center;justify-content:center;padding:0 .35rem}
+.alt button:hover:not(:disabled):not([aria-pressed=true]){border-color:var(--primary);background:var(--hover)}
+.alt button:active:not(:disabled){transform:scale(.98)}
+.alt button[aria-pressed=true],.alt button[aria-pressed=true]:hover{background:var(--primary);border-color:var(--primary);color:var(--on-primary)}
+.alt button[aria-pressed=true] .l::before{background:var(--on-primary);border:3px solid var(--primary);outline:1.5px solid var(--on-primary)}
+.alt button[aria-pressed=true] .n{background:rgba(255,255,255,.2);color:inherit}
+.alt button:disabled{color:var(--faint);background:transparent;border-style:dashed;cursor:not-allowed}
+.alt button:disabled .l::before{border-style:dashed}
+.alt button:disabled .n{background:transparent}
+.bunn{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;padding:.9rem 1.5rem;border-top:1px solid var(--rule);background:var(--hover)}
+.valgt-rad{display:flex;flex-wrap:wrap;gap:6px;min-height:0}
+.pille{display:inline-flex;align-items:center;gap:.25rem;min-height:30px;padding:0 .3rem 0 .75rem;background:var(--surface);border:1px solid var(--control);border-radius:999px;font-size:.8125rem;color:var(--text);animation:inn var(--t-med) var(--ease)}
+@keyframes inn{from{opacity:0;transform:scale(.94)}}
+.pille button{border:0;background:none;min-width:26px;height:26px;line-height:1;border-radius:50%;color:var(--muted);font-size:1.0625rem;padding:0}
+.pille button:hover{background:var(--active);color:var(--ink)}
+.hjelp-rad{display:flex;align-items:center;gap:1rem;margin-left:auto}
+.hjelp-rad .tall{font-size:.8125rem;color:var(--muted)}
+.tekstkn{background:none;border:0;padding:.25rem 0;color:var(--text);text-decoration:underline;text-underline-offset:3px;font-size:.8125rem;min-height:28px}
+.tekstkn:hover{color:var(--data)}
+.tekstkn:disabled{color:var(--faint);text-decoration:none;cursor:default}
+
+/* ---------- Resultater ---------- */
+.res-hode{display:flex;justify-content:space-between;gap:.75rem;align-items:center;flex-wrap:wrap;margin:1.75rem 0 .6rem;font-size:.8125rem;color:var(--muted)}
+.res-hode .gr{display:flex;gap:1rem;align-items:center;flex-wrap:wrap}
+.liste{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.liste-inn{margin-bottom:-1px}
+.liste[hidden]{display:none}
+.sc-y{display:grid;grid-template-rows:1fr;transition:grid-template-rows var(--t-med) var(--ease),opacity var(--t-med) var(--ease)}
+.sc-y>.sc{min-height:0;overflow:hidden;border-bottom:1px solid var(--rule)}
+.sc-y[data-t=borte]{grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows var(--t-med) var(--ease),opacity var(--t-fast) linear,visibility 0s linear var(--t-med)}
+.vis-skjulte .sc-y[data-t=borte]{grid-template-rows:1fr;opacity:1;visibility:visible;transition:grid-template-rows var(--t-med) var(--ease),opacity var(--t-med) var(--ease)}
+.sc-y[data-t=borte] .sc{background:var(--ground)}
+.sc-y[data-t=borte] .nr,.sc-y[data-t=borte] .t1,.sc-y[data-t=borte] .t2,.sc-y[data-t=borte] .forhand{color:var(--faint)}
+.sc{display:grid;grid-template-columns:48px minmax(0,5fr) minmax(0,7fr) 2.5rem;align-items:start}
+.cb{display:flex;align-items:flex-start;justify-content:center;width:48px;min-height:44px;margin:0;padding-top:1.1rem}
+.cb input{width:1.125rem;height:1.125rem;margin:0;accent-color:var(--primary)}
+.exp{grid-column:2/5;display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr) 2.5rem;gap:0;align-items:start;width:100%;text-align:left;background:none;border:0;padding:0;min-height:44px;transition:background var(--t-fast)}
+.exp:hover{background:var(--hover)}
+.venstre{display:grid;grid-template-columns:2.25rem minmax(0,1fr);gap:.5rem;padding:1rem 1.25rem 1rem 0}
+.hoyre{padding:1rem 1rem 1rem 0;min-height:1px}
+.nr{font-size:1.5rem;font-weight:300;color:#032A3F;line-height:1.2;font-variant-numeric:tabular-nums}
+@media (prefers-color-scheme:dark){.nr{color:var(--blaa)}}
+.tit{display:block}
+.t1{display:block;font-size:.9375rem;font-weight:600;color:var(--ink);line-height:1.4}
+.t2{display:block;font-size:.875rem;color:var(--muted);margin-top:3px;line-height:1.4}
+.arsak{display:none;margin:.3rem 0 0;font-size:.75rem;color:var(--faint)}
+.sc-y[data-t=borte] .arsak{display:block}
+.forhand-y{display:grid;grid-template-rows:1fr;transition:grid-template-rows var(--t-med) var(--ease),opacity var(--t-fast)}
+.forhand-y>span{min-height:0;overflow:hidden}
+.forhand{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;font-size:.875rem;color:var(--muted)}
+.sc.apen .forhand-y{grid-template-rows:0fr;opacity:0}
+.pil{align-self:start;display:flex;align-items:center;justify-content:center;width:2.5rem;height:2.5rem;margin-top:.55rem;color:var(--muted);transition:transform var(--t-med) var(--ease)}
+.sc.apen .pil{transform:rotate(180deg)}
+.kropp-y{grid-column:3/5;display:grid;grid-template-rows:0fr;transition:grid-template-rows var(--t-med) var(--ease)}
+.sc.apen .kropp-y{grid-template-rows:1fr}
+.kropp-y>div{min-height:0;overflow:hidden}
+.sc-kropp{padding:0 1.25rem 1.25rem 0;font-size:.9375rem}
+.sc-kropp .lbl{font-size:.75rem;color:var(--muted);margin:-.25rem 0 .4rem}
+.sc-kropp .konk{max-width:70ch}
+.sc-kropp .un .kun{min-height:32px;font-size:.8125rem}
+.sc-kropp .un{display:flex;gap:1rem;flex-wrap:wrap;align-items:center;margin-top:.9rem;padding-top:.7rem;border-top:1px solid var(--rule);font-size:.8125rem;color:var(--muted)}
+.sc.flash{animation:flash 1.1s var(--ease)}
+@keyframes flash{from{background:rgba(127,180,214,.35)}}
+.tom{padding:2rem 1.5rem;border:1px dashed var(--control);border-radius:var(--radius);color:var(--muted);animation:inn var(--t-med) var(--ease)}
+.tom[hidden]{display:none}
+.tom b{display:block;color:var(--ink);font-weight:600;margin-bottom:.25rem}
+.skjulte{margin-top:.9rem}
+.skjulte[hidden]{display:none}
+.skjulte .rad{display:flex;justify-content:space-between;align-items:center;gap:.75rem;font-size:.8125rem;color:var(--muted)}
+.vedlegg{margin-top:1.5rem}
+.vedlegg h3{font-size:.8125rem;font-weight:400;color:var(--muted);margin:0 0 .4rem}
+.vedlegg .rutenett{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem}
+.vedlegg label{display:flex;align-items:center;gap:.5rem;min-height:48px;padding:0 1rem 0 .25rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-s);font-size:.9375rem;transition:border-color var(--t-fast)}
+.vedlegg label:hover{border-color:var(--control)}
+.vedlegg .cb{width:40px;min-height:40px;padding-top:0;align-items:center}
+
+/* ---------- Yrkesmessig utleie (egen, fremhevet seksjon) ---------- */
+.yrk{margin-top:1.25rem;background:var(--tint);border:1px solid var(--tint-b);border-radius:16px;padding:1.5rem 1.5rem 1.6rem}
+.yrk-hode{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-bottom:1.1rem}
+.yrk-hode h2{font-size:1.625rem;font-weight:600;letter-spacing:-.015em;color:var(--ink)}
+.yrk-sub{margin:.25rem 0 0;font-size:.9375rem;color:var(--muted)}
+.yrk-hode .hoyre-gr{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.yrk-rutenett{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem}
+.yrk-kort{background:var(--surface);border:1px solid var(--tint-b);border-top:4px solid #032A3F;border-radius:var(--radius);padding:1.25rem 1.25rem 1.5rem}
+@media (prefers-color-scheme:dark){.yrk-kort{border-top-color:var(--primary)}}
+.yrk-ikon{display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:10px;background:#032A3F;color:#fff}
+@media (prefers-color-scheme:dark){.yrk-ikon{background:var(--primary);color:var(--on-primary)}}
+.yrk-kort h3{font-size:1.1875rem;font-weight:700;color:var(--ink);margin:.9rem 0 .5rem;line-height:1.3}
+.yrk-kort p{margin:0;font-size:.9375rem;line-height:1.6;color:var(--text)}
+@media (max-width:1100px){.yrk-rutenett{grid-template-columns:1fr}}
+
+/* ---------- Andre visninger ---------- */
+
+/* ---------- Hover-tips ---------- */
+#tips{position:fixed;z-index:60;max-width:290px;padding:.65rem .8rem;border-radius:8px;background:#032A3F;color:#fff;font-size:.8125rem;line-height:1.45;pointer-events:none;box-shadow:0 8px 28px rgba(0,0,0,.28);animation:tips var(--t-fast) var(--ease)}
+#tips[hidden]{display:none}
+#tips b{display:block;font-weight:600;font-size:.875rem}
+#tips span{display:block;margin-top:.2rem;color:rgba(255,255,255,.85)}
+@keyframes tips{from{opacity:0;transform:translateY(3px)}}
+@media (prefers-color-scheme:dark){#tips{background:#e8eef2;color:#0a1118}#tips span{color:#2c3a46}}
+@media (forced-colors:active){#tips{border:1px solid CanvasText}}
+
+/* ---------- Knapper for PDF-utvalg: «Ta med i PDF» (av/på) og «Kun denne til PDF» ---------- */
+.velg,.kun{display:inline-flex;align-items:center;gap:.55rem;min-height:36px;padding:0 .95rem;border:1px solid var(--control);border-radius:var(--radius-s);background:var(--surface);color:var(--text);font-size:.875rem;font-weight:500;line-height:1;white-space:nowrap;transition:background var(--t-fast),border-color var(--t-fast),color var(--t-fast),transform var(--t-fast)}
+.velg{padding:0 1rem 0 .7rem;cursor:pointer}
+.kun:hover,.velg:hover{border-color:var(--primary);background:var(--hover)}
+.kun:active,.velg:active{transform:scale(.98)}
+.velg input{appearance:none;-webkit-appearance:none;flex:none;width:18px;height:18px;margin:0;border:1.5px solid var(--control);border-radius:5px;background:var(--surface) center/12px no-repeat;transition:background-color var(--t-fast),border-color var(--t-fast)}
+.velg input:checked{background-color:var(--primary);border-color:var(--primary);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.4 5 8.8 9.6 3.4'/%3E%3C/svg%3E")}
+@media (prefers-color-scheme:dark){.velg input:checked{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%230a1118' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.4 5 8.8 9.6 3.4'/%3E%3C/svg%3E")}}
+.velg:has(input:checked){border-color:var(--primary);background:var(--active);color:var(--ink)}
+.velg:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
+.velg input:focus-visible{outline:none}
+@media (pointer:coarse){.velg,.kun{min-height:44px}}
+@media (forced-colors:active){.velg input:checked{background-color:Highlight}}
+
+/* ---------- Felles ---------- */
+.fotnote{font-size:.8125rem;color:var(--text);margin-top:.9em;padding-top:.6em;border-top:1px dashed var(--control)}
+.konk p:last-child{margin-bottom:0}
+.antall{font-variant-numeric:tabular-nums}
+@keyframes vis{from{opacity:0;transform:translateY(6px)}}
+.visn-side:not([hidden]){animation:vis var(--t-med) var(--ease)}
+.mobbar{display:none}
+/* taste-skill-ignore: toasten flyter over innholdet */
+#toast.vis{background:var(--primary);color:var(--on-primary);box-shadow:0 6px 24px rgba(0,0,0,.25)}
+
+@media (forced-colors:active){
+  .alt button[aria-pressed=true]{outline:2px solid Highlight;outline-offset:-2px}
+  .sb nav a[aria-current=page]{outline:1px solid Highlight}
+  .brikke[data-t=passer]{outline:1px solid Highlight}
+}
+@media (max-width:1180px){.q{grid-template-columns:1fr}.q h2{padding-top:0}}
+@media (max-width:900px){
+  #app{display:block}
+  .sb{position:relative;height:auto;padding:.75rem 1rem;gap:0;overflow:visible}
+  .sb .omr,.sb nav,.sb .tittel-sb{display:none}
+  .merke{padding:0;min-height:44px}
+  .ord{font-size:1.5rem}
+  .bdo svg{height:19px}
+  .meny{display:inline-flex;position:absolute;right:1rem;top:.7rem;min-height:44px;align-items:center;padding:0 .9rem;border:1px solid rgba(255,255,255,.4);border-radius:8px;background:transparent;color:#fff;font-size:.875rem}
+  .sb.apen nav{display:grid;margin-top:1rem}
+  .sb.apen .omr{display:grid;margin-top:1rem}
+  main{padding:1rem 1rem 5.5rem}
+  .hero{min-height:330px;border-radius:12px;align-items:flex-end}
+  .hero img{object-position:84% 30%;height:62%}
+  .hero::before{background:linear-gradient(0deg,#032A3F 0%,#032A3F 42%,rgba(3,42,63,.55) 62%,rgba(3,42,63,0) 85%)}
+  .hero.liten::before{background:none}
+  .hero-in{padding:1.25rem}
+  .hero h1{font-size:1.875rem}
+  .hand .kn{flex:1}
+  .spor{padding:1.25rem 1rem}
+  .brikke{width:40px;height:40px}
+  .q{padding:1rem}
+  .bunn{padding:.9rem 1rem}
+  .sc{grid-template-columns:44px minmax(0,1fr)}
+  .cb{width:44px}
+  .exp{grid-column:2/3;grid-template-columns:minmax(0,1fr) 2.25rem}
+  .exp .hoyre{grid-column:1/2;grid-row:2;padding:0 0 1rem}
+  .exp .pil{grid-column:2;grid-row:1}
+  .venstre{padding:1rem .25rem .6rem 0}
+  .kropp-y{grid-column:2/3}
+  .sc-kropp{padding:0 1rem 1.25rem 0}
+  .vedlegg .rutenett{grid-template-columns:1fr}
+  .side{padding:1.25rem}
+  .mobbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:20;justify-content:space-between;align-items:center;gap:.75rem;padding:.625rem 1rem calc(.625rem + env(safe-area-inset-bottom));background:#032A3F;color:#fff;font-size:.875rem;animation:vis var(--t-med) var(--ease)}
+  .mobbar[hidden]{display:none}
+  .mobbar a{color:inherit;text-decoration:underline;text-underline-offset:3px;min-height:44px;display:inline-flex;align-items:center}
+  .mobbar b{font-variant-numeric:tabular-nums}
+}
+@media (pointer:coarse){.tekstkn{min-height:44px;display:inline-flex;align-items:center}.pille button{min-width:34px;height:34px}.alt button{min-height:46px}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+@media print{:root{--text:#2B2B2B;--muted:#5b6066;--primary:#032A3F;--ink:#10222d;--pp-rod:#B5121B;--pp-bla:#0070C0;color-scheme:light}}
+<!--BODY-->
+<div id="app">
+  <aside class="sb" id="sb">
+    <div class="merke"><span class="ord">Bauda<i></i></span><span class="strek" aria-hidden="true"></span><span class="bdo" role="img" aria-label="BDO">%%BDO%%</span></div>
+    <div class="tittel-sb">MVA-oppslagsverk</div>
+    <button class="meny" id="meny" aria-expanded="false" aria-controls="nav">Meny</button>
+    <div class="omr"><span>Gjelder</span><strong>Utleiebiler og demobiler</strong></div>
+    <nav aria-label="Hovedmeny" id="nav"></nav>
+    <div class="sb-yrk" id="sb-yrk" role="group" aria-label="Yrkesmessig utleie"></div>
+    <button type="button" class="tre" id="tre" aria-label="Nullstill valg" aria-disabled="true"></button>
+    <button type="button" class="tre-reset" id="tre-reset" disabled>Nullstill valg</button>
+    <div class="sb-eks"><button type="button" class="kn" data-h="eksalt">Eksporter alt til PDF</button><button type="button" class="kn prim" data-eks>Eksporter valgte til PDF</button></div>
+  </aside>
+  <main id="hoved"></main>
+</div>
+<div class="mobbar" id="mobbar"></div>
+<!--JS-->
+/* Tilordning av scenarioer til spørsmålene i beslutningstreet (utledet av ordlyden i scenariooverskriftene).
+   null = scenarioet setter ingen vilkår på dette spørsmålet. */
+const FASETT = [
+  { id: 'bruk', q: 'Hva skjer med bilen?', valg: [['utleie', 'Leies ut som utleiebil'], ['demo', 'Brukes som demobil'], ['firma', 'Leies ut fra Bauda Mobility og brukes som firmabil hos forhandler / Bauda']] },
+  { id: 'kjt', q: 'Hva slags kjøretøy er det?', valg: [['fossil', 'Fossilt personkjøretøy'], ['el', 'Elektrisk personkjøretøy'], ['varebil', 'Varebil klasse 2']] },
+  { id: 'tid', q: 'Hvor lenge leies bilen ut?', valg: [['under', 'Under 30 dager'], ['over', 'Over 30 dager']] }
+];
+const ATTR = {
+  s1: { bruk: ['utleie'], kjt: ['fossil'], tid: ['over'] },
+  s2: { bruk: ['utleie'], kjt: ['fossil'], tid: ['under'] },
+  s3: { bruk: ['utleie'], kjt: ['el'], tid: ['over'] },
+  s4: { bruk: ['utleie'], kjt: ['el'], tid: ['under'] },
+  s5: { bruk: ['utleie'], kjt: ['varebil'], tid: null },
+  s6: { bruk: ['demo'], kjt: ['fossil', 'el'], tid: null },
+  s7: { bruk: ['demo'], kjt: ['varebil'], tid: null },
+  s8: { bruk: ['firma'], kjt: ['el'], tid: ['over'] }
+};
+const SC = ITEMS.filter(i => i.type === 'scenario');
+/* Korte overskrifter og oppsummeringer til hover. Hentet fra scenariotekstene; de erstatter ikke teksten. */
+const SAMMENDRAG = {
+  s1: ['Utleie over 30 dager, fossilt', 'Utleien faktureres med mva (25 %). Fradragsrett når bilen faktisk brukes i utleie.'],
+  s2: ['Utleie under 30 dager, fossilt', 'Utleien faktureres med mva (25 %). Fradragsrett når bilen faktisk brukes i utleie.'],
+  s3: ['Utleie over 30 dager, elektrisk', 'Delvis fritatt pr 2026: mva beregnes av en andel av leien (mval. § 6-8). Ikke fradragsrett ved bruk til verksted eller demobil.'],
+  s4: ['Utleie under 30 dager, elektrisk', 'Utleien faktureres med mva (25 %). Ikke fradragsrett ved bruk til verksted eller demobil.'],
+  s5: ['Utleie av varebil klasse 2', 'Utleien faktureres med mva (25 %). Brukes den som demobil: egne regler med fradragsrett.'],
+  s6: ['Demobil, personkjøretøy', 'Uttaksmva i eget selskap. Forhandler har ikke fradragsrett.'],
+  s7: ['Demobil, varebil klasse 2', 'Ingen uttaksmva. Forhandler har fradragsrett.'],
+  s8: ['Firmabil hos forhandler / Bauda', 'Utleien faktureres med mva (25 %). Over 30 dager: andel. Elbil-reglene for over 30 dager gjelder.']
+};
+const sel = {};
+let gruppe = null;   // «Utleie» eller «Andre forhold» når brukeren trykker på gruppeoverskriften
+const manuell = {};
+const avvalgt = new Set();
+let visSkjulte = false, visning = 'scenarioer', sistN = null;
+const passer = (id, s) => (!gruppe || ITEM[id].s.gruppe === gruppe) && FASETT.every(f => !s[f.id] || !ATTR[id][f.id] || ATTR[id][f.id].includes(s[f.id]));
+const treff = (s = sel) => SC.filter(i => passer(i.id, s));
+const arsaker = id => [...(gruppe && ITEM[id].s.gruppe !== gruppe ? [gruppe] : []), ...FASETT.filter(f => sel[f.id] && ATTR[id][f.id] && !ATTR[id][f.id].includes(sel[f.id])).map(f => f.valg.find(v => v[0] === sel[f.id])[1])];
+const synligeIds = () => treff().map(i => i.id);
+window.synlige = synligeIds;
+const antSvar = () => Object.keys(sel).length;
+const erApen = (id, t) => id in manuell ? manuell[id] : (t.length === 1 && t[0].id === id);
+
+const ikon = {
+  chev: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
+  scenarioer: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>',
+  yrk: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>'
+};
+const titlerSpan = s => `<span class="tit"><span class="t1">${seg(s.problemstilling)}</span>${s.problemstilling_alt ? `<span class="t2">${seg(s.problemstilling_alt)}</span>` : ''}${s.problemstilling_tillegg ? `<span class="t2">${seg(s.problemstilling_tillegg)}</span>` : ''}</span>`;
+
+/* ---------- Bygg én gang ---------- */
+function byggRad(i) {
+  const s = i.s, første = plain(s.konklusjon[0]) + (s.konklusjon[1] ? ' ' + plain(s.konklusjon[1]) : '');
+  return `<div class="sc-y" data-id="${i.id}" data-t="passer"><article class="sc" id="sc-${i.id}">
+    <label class="cb"><input type="checkbox" data-velg="${i.id}" aria-label="Ta med scenario ${s.nr} i PDF"></label>
+    <button type="button" class="exp" data-tog="${i.id}" aria-expanded="false" aria-controls="k-${i.id}">
+      <span class="venstre"><span class="nr">${s.nr}</span><span class="tit-boks">${titlerSpan(s)}<span class="arsak"></span></span></span>
+      <span class="hoyre"><span class="forhand-y"><span><span class="forhand">${esc(første)}</span></span></span></span>
+      <span class="pil">${ikon.chev}</span></button>
+    <div class="kropp-y" id="k-${i.id}"><div><div class="sc-kropp"><div class="lbl">Konklusjon/mva-behandling</div><div class="konk">${konklusjon(s)}</div>
+      <div class="un"><span>${opprinnelig(s)}</span>${kunKnapp(i.id)}</div></div></div></div></article></div>`;
+}
+const yikon = [
+  '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>',
+  '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></svg>',
+  '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M19 5 5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg>'
+];
+function byggYrk() {
+  const kort = D.yrkesmessig_utleie.avsnitt.map((av, k) => `<article class="yrk-kort"><span class="yrk-ikon">${yikon[k] || yikon[0]}</span><h3>${seg([av[0]])}</h3><p>${seg(av.slice(1).map((x, n) => n ? x : { ...x, tekst: x.tekst.trim() }))}</p></article>`).join('');
+  return `<section class="yrk" id="yrk-seksjon" aria-labelledby="yrk-h"><div class="yrk-hode"><div><h2 id="yrk-h">${seg(D.yrkesmessig_utleie.tittel)}</h2><p class="yrk-sub">Bakgrunn for fradragsretten i scenarioene.</p></div><div class="hoyre-gr">${velgBoks('yrk')}${kunKnapp('yrk')}</div></div><div class="yrk-rutenett">${kort}</div></section>`;
+}
+const LYS = `<svg class="lys" aria-hidden="true" focusable="false" viewBox="0 0 1100 619" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="gv" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff9a4a" stop-opacity="0"/><stop offset=".3" stop-color="#ffb066" stop-opacity=".95"/><stop offset=".55" stop-color="#ff7a2e" stop-opacity=".55"/><stop offset="1" stop-color="#ff6a1e" stop-opacity="0"/></linearGradient>
+    <linearGradient id="gh2" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff8a3c" stop-opacity=".0"/><stop offset=".25" stop-color="#ff8a3c" stop-opacity=".55"/><stop offset="1" stop-color="#ff7a2e" stop-opacity=".25"/></linearGradient>
+    <filter id="u8" x="-20%" y="-60%" width="140%" height="220%"><feGaussianBlur stdDeviation="9"/></filter>
+    <filter id="u3" x="-30%" y="-100%" width="160%" height="300%"><feGaussianBlur stdDeviation="3"/></filter>
+    <filter id="u16" x="-50%" y="-100%" width="200%" height="300%"><feGaussianBlur stdDeviation="16"/></filter>
+  </defs>
+  <g class="l-vegg"><polygon points="684,262 1100,228 1100,268 684,300" fill="url(#gv)" filter="url(#u8)"/><rect x="515" y="245" width="170" height="90" fill="#ff7a2e" opacity=".33" filter="url(#u16)"/></g>
+  <g class="l-gulv"><polygon points="800,448 1100,452 1100,478 800,468" fill="url(#gh2)" filter="url(#u8)"/></g>
+  <g class="l-front"><ellipse cx="500" cy="389" rx="64" ry="20" fill="#bfe6ff" opacity=".4" filter="url(#u16)"/><ellipse cx="499" cy="388" rx="46" ry="5" transform="rotate(-7 499 388)" fill="#f2fbff" filter="url(#u3)"/><ellipse cx="489" cy="420" rx="11" ry="20" fill="#cfeaff" opacity=".8" filter="url(#u3)"/></g>
+  <g class="l-bak"><ellipse cx="836" cy="372" rx="9" ry="16" fill="#ff2a2a" opacity=".55" filter="url(#u8)"/><ellipse cx="836" cy="371" rx="3" ry="8" fill="#ff7a6a" filter="url(#u3)"/></g>
+</svg>`;
+function byggHero(tittel, sub, knapper, medBilde) {
+  return `<header class="hero ${medBilde ? '' : 'liten'}">${medBilde ? `<img id="bil" src="%%BIL%%" alt="Blå Toyota-sedan parkert foran en moderne bygning" width="1100" height="619" decoding="async">${LYS}` : ''}
+    <div class="hero-in"><h1>${tittel}</h1><p class="sub">${sub}</p><div class="hand">${knapper}</div></div></header>`;
+}
+function byggScenarioer() {
+  const rader = FASETT.map(f => `<div class="q" role="group" aria-label="${esc(f.q)}"><h2>${esc(f.q)}</h2><div class="alt">${f.valg.map(([v, t]) =>
+    `<button type="button" data-f="${f.id}" data-v="${v}" aria-pressed="false"><span class="l"><span>${esc(t)}</span></span><span class="n tall"></span></button>`).join('')}</div></div>`).join('');
+  const grupper = [...new Set(SC.map(i => i.s.gruppe))];
+  const brikker = grupper.map(g => `<div class="grp" role="group" aria-label="${esc(g)}"><button type="button" class="grp-t" data-gruppe="${esc(g)}" aria-pressed="false" data-tip-h="Scenario ${SC.filter(i => i.s.gruppe === g).map(i => i.s.nr).join(', ')}" data-tip="Trykk for å vise bare disse">${esc(g)}</button><div class="grp-b">${SC.filter(i => i.s.gruppe === g).map(i =>
+    `<button type="button" class="brikke" data-brikke="${i.id}" data-t="passer" data-tip-h="Scenario ${i.s.nr}: ${esc(SAMMENDRAG[i.id][0])}" data-tip="${esc(SAMMENDRAG[i.id][1])}" aria-label="Scenario ${i.s.nr}: ${esc(SAMMENDRAG[i.id][0])}">${i.s.nr}</button>`).join('')}</div></div>`).join('');
+  return `<section class="visn-side" id="v-scenarioer">
+    ${byggHero('Scenarioer', `${esc(D.tittel)}. ${SC.length} scenarioer for forhandlerne i Bauda.`, '<button class="kn" data-h="eksalt">Eksporter alt til PDF</button><button class="kn prim" data-eks>Eksporter valgte til PDF</button>', true)}
+    ${byggYrk()}
+    <section class="beslut" aria-label="Finn riktig scenario">
+      <div class="spor"><div class="status"><span class="stor" id="stor" aria-hidden="true"></span><div class="tekst" role="status" aria-live="polite"><span id="tittel"></span><small id="under"></small></div></div>
+        <div class="brikker">${brikker}</div></div>
+      ${rader}
+      <div class="bunn"><div class="valgt-rad" id="valgte"></div><div class="hjelp-rad"><span class="tall" id="besvart"></span><button type="button" class="tekstkn" data-nullstill>Nullstill</button></div></div>
+    </section>
+    <div id="svar">
+      <div class="res-hode"><div class="gr"><span class="antall"></span><button class="tekstkn" data-h="alle">Velg alle</button><button class="tekstkn" data-h="ingen">Fjern alle</button><button class="tekstkn" data-h="synlige">Kun de som passer</button></div>
+        <div class="gr"><button class="tekstkn" data-apneAlle id="apneAlle"></button></div></div>
+      <div class="liste" id="liste"><div class="liste-inn">${SC.map(byggRad).join('')}</div></div>
+      <div class="tom" id="tom" hidden><b>Ingen scenarioer passer</b>Kombinasjonen finnes ikke i oppslagsverket. Fjern ett av valgene for å se hvilke scenarioer som gjenstår.</div>
+      <div class="skjulte" id="skjulte" hidden><div class="rad"><span class="tall" id="skjulteTxt"></span><button class="tekstkn" data-skjulte id="skjulteKn"></button></div></div>
+    </div></section>`;
+}
+
+/* ---------- Levende tre i margen: følger filtreringen. Trykk på treet for å nullstille. ---------- */
+const TRE_KOL = [
+  { id: 'bruk', tittel: 'Bruk', kort: { utleie: 'Utleie', demo: 'Demobil', firma: 'Firmabil' }, verdier: ['utleie', 'demo', 'firma'] },
+  { id: 'kjt', tittel: 'Kjøretøy', kort: { fossil: 'Fossilt', el: 'Elektrisk', varebil: 'Varebil kl. 2' }, verdier: ['fossil', 'el', 'varebil'] },
+  { id: 'tid', tittel: 'Varighet', kort: { under: '< 30 dager', over: '> 30 dager' }, verdier: ['under', 'over', 'uansett'] }
+];
+const TRE_BANER = [];
+SC.forEach(i => { const at = ATTR[i.id]; at.kjt.forEach(k => (at.tid || ['uansett']).forEach(t => TRE_BANER.push({ s: i.id, kjede: ['rot', '0:' + at.bruk[0], '1:' + k, '2:' + t, 'b:' + i.id] }))); });
+const TRE = { kanter: {}, noder: {}, forste: true };
+/* Korte navn på sluttalternativene (scenarioene) */
+const SLUTT = { s1: 'Fossil >30 dager', s2: 'Fossil <30 dager', s3: 'Elbil >30 dager', s4: 'Elbil <30 dager', s5: 'Varebil, utleie', s6: 'Demobil, personbil', s7: 'Demobil, varebil', s8: 'Firmabil' };
+function byggTre() {
+  const boks = $('#tre'); if (!boks) return;
+  const W = 272, H = 292, G = 68, n = SC.length, lx = SC.map((_, k) => G + 12 + k * ((W - G - 24) / (n - 1))), nivaY = [244, 190, 136], bladY = 116, lab = 106;
+  const pos = { rot: { x: G + (W - G) / 2, y: H - 14 } };
+  TRE_KOL.forEach((kol, c) => {
+    const arr = kol.verdier.map(v => { const idx = TRE_BANER.filter(b => b.kjede[c + 1] === c + ':' + v).map(b => SC.findIndex(i => i.id === b.s)); return idx.length ? { k: c + ':' + v, x: lx[0] + (idx.reduce((s, x) => s + x, 0) / idx.length) * (lx[1] - lx[0]) } : null; }).filter(Boolean).sort((p, q) => p.x - q.x);
+    for (let k = 1; k < arr.length; k++) if (arr[k].x - arr[k - 1].x < 30) arr[k].x = arr[k - 1].x + 30;
+    const over = arr[arr.length - 1].x - (W - 14); if (over > 0) arr.forEach(o => o.x -= over);
+    arr.forEach(o => pos[o.k] = { x: o.x, y: nivaY[c] });
+  });
+  SC.forEach((i, k) => pos['b:' + i.id] = { x: lx[k], y: bladY });
+  TRE.kanter = {}; TRE.noder = {};
+  TRE_BANER.forEach(b => b.kjede.forEach((k, t) => {
+    (TRE.noder[k] = TRE.noder[k] || new Set()).add(b.s);
+    if (t) { const key = b.kjede[t - 1] + '>' + k; (TRE.kanter[key] = TRE.kanter[key] || { a: b.kjede[t - 1], b: k, s: new Set(), d: t }).s.add(b.s); }
+  }));
+  const kurve = (p, q) => { const m = (p.y + q.y) / 2; return `M${p.x.toFixed(1)} ${p.y.toFixed(1)}C${p.x.toFixed(1)} ${m.toFixed(1)} ${q.x.toFixed(1)} ${m.toFixed(1)} ${q.x.toFixed(1)} ${q.y.toFixed(1)}`; };
+  let ghost = '', live = '', noder = '', part = '', niv = '', teller = 0;
+  Object.entries(TRE.kanter).forEach(([key, e]) => {
+    const d = kurve(pos[e.a], pos[e.b]); ghost += `<path class="gh" d="${d}"/>`; live += `<path class="lv av" data-kant="${key}" d="${d}"/>`;
+    const dur = 3.4 + ((teller * 37) % 17) / 6, start = -((teller * 53) % 29) / 7; teller++;
+    part += `<g class="pt av" data-kant="${key}"><circle r="4.2" class="ha"/><circle r="1.5"/><animateMotion dur="${dur.toFixed(2)}s" begin="${start.toFixed(2)}s" repeatCount="indefinite" path="${d}" keyPoints="0;1" keyTimes="0;1" calcMode="linear"/></g>`;
+  });
+  Object.keys(TRE.noder).forEach(k => {
+    const q = pos[k]; if (k === 'rot') return;
+    if (k.startsWith('b:')) noder += `<g class="lf av" data-nd="${k}"><circle class="g" cx="${q.x.toFixed(1)}" cy="${q.y}" r="6"/><circle class="p" cx="${q.x.toFixed(1)}" cy="${q.y}" r="3"/></g>`;
+    else noder += `<g class="nd av" data-nd="${k}"><circle class="rg" cx="${q.x.toFixed(1)}" cy="${q.y}" r="6"/><circle class="k" cx="${q.x.toFixed(1)}" cy="${q.y}" r="2.3"/></g>`;
+  });
+  TRE_KOL.forEach((kol, c) => { niv += `<g class="niv" data-niva="${kol.id}" transform="translate(0 ${nivaY[c]})"><line class="strek" x1="${G - 6}" y1="0" x2="${W - 8}" y2="0"/><circle class="pip" cx="3" cy="0" r="2.7"/><text x="11" y="3.6">${kol.tittel}</text></g>`; });
+  niv += `<g class="niv" data-niva="blad" transform="translate(0 ${bladY})"><circle class="pip" cx="3" cy="0" r="2.7"/><text x="11" y="3.6">8/8</text></g>`;
+  const ende = SC.map((i, k) => `<g class="endelab av" data-ende="${i.id}"><text transform="translate(${(lx[k] + 3.4).toFixed(1)} ${bladY - 12}) rotate(-90)">${i.s.nr} ${SLUTT[i.id]}</text></g>`).join('');
+  boks.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMax meet" focusable="false" aria-hidden="true"><defs><linearGradient id="trg" gradientUnits="userSpaceOnUse" x1="0" y1="${H}" x2="0" y2="0"><stop offset="0" stop-color="#fff" stop-opacity=".92"/><stop offset="1" stop-color="#9fd2f0" stop-opacity=".5"/></linearGradient><radialGradient id="rg"><stop offset="0" stop-color="#9fd2f0" stop-opacity=".45"/><stop offset="1" stop-color="#9fd2f0" stop-opacity="0"/></radialGradient></defs>${niv}${ende}${ghost}${live}${part}<circle class="rotglod" cx="${pos.rot.x}" cy="${pos.rot.y}" r="16"/><circle class="rot" cx="${pos.rot.x}" cy="${pos.rot.y}" r="3"/>${noder}</svg>`;
+  $$('.lv', boks).forEach(p => p.style.setProperty('--len', Math.ceil(p.getTotalLength()) + 2));
+}
+function oppdaterTre() {
+  const boks = $('#tre'); if (!boks || !boks.querySelector('svg')) return;
+  const ids = treff().map(i => i.id), aktiv = s => [...s].some(x => ids.includes(x)), forste = TRE.forste, filtrert = antSvar() > 0 || !!gruppe;
+  $$('.lv', boks).forEach(p => {
+    const e = TRE.kanter[p.dataset.kant];
+    if (forste) p.style.transitionDelay = (e.d * 0.18) + 's';
+    p.classList.toggle('av', !aktiv(e.s));
+  });
+  $$('.pt', boks).forEach(g => g.classList.toggle('av', !aktiv(TRE.kanter[g.dataset.kant].s)));
+  $$('[data-nd]', boks).forEach(g => {
+    const k = g.dataset.nd, på = aktiv(TRE.noder[k]);
+    g.classList.toggle('av', !på);
+    if (!k.startsWith('b:')) { const [c, v] = k.split(':'); g.classList.toggle('valgt', på && sel[TRE_KOL[+c].id] === v); }
+  });
+  TRE_KOL.forEach(kol => {
+    const g = $(`.niv[data-niva="${kol.id}"]`, boks), v = sel[kol.id];
+    g.classList.toggle('har', !!v); $('text', g).textContent = v ? kol.kort[v] : kol.tittel;
+  });
+  $$('.endelab', boks).forEach(g => g.classList.toggle('av', !ids.includes(g.dataset.ende)));
+  const knapp = $('#tre-reset'); if (knapp) knapp.disabled = !filtrert;
+  const gb = $('.niv[data-niva="blad"]', boks); gb.classList.toggle('har', ids.length < SC.length); $('text', gb).textContent = ids.length + '/' + SC.length;
+  boks.toggleAttribute('data-aktiv', filtrert); boks.setAttribute('aria-disabled', !filtrert);
+  boks.setAttribute('aria-label', filtrert ? 'Nullstill valg. ' + ids.length + ' av ' + SC.length + ' scenarioer passer' : 'Ingen valg gjort');
+  if (filtrert) { boks.dataset.tipH = 'Nullstill valg'; boks.dataset.tip = 'Trykk på treet for å fjerne alle filtre'; } else { delete boks.dataset.tipH; delete boks.dataset.tip; }
+  if (forste) { TRE.forste = false; setTimeout(() => $$('.lv', boks).forEach(p => p.style.transitionDelay = ''), 2200); }
+}
+function fokusTre(ider) {
+  const boks = $('#tre'); if (!boks) return;
+  const sett = ider ? new Set([].concat(ider)) : null, treffer = s => !!sett && [...s].some(x => sett.has(x));
+  boks.classList.toggle('fo', !!sett);
+  $$('.lv', boks).forEach(p => p.classList.toggle('f', treffer(TRE.kanter[p.dataset.kant].s)));
+  $$('.lf', boks).forEach(g => g.classList.toggle('f', !!sett && sett.has(g.dataset.nd.slice(2))));
+  $$('.pt', boks).forEach(g => g.classList.toggle('f', treffer(TRE.kanter[g.dataset.kant].s)));
+  $$('.endelab', boks).forEach(g => g.classList.toggle('f', !!sett && sett.has(g.dataset.ende)));
+}
+/* Forhåndsvisning: hva blir igjen hvis man velger (eller fjerner) dette? */
+function forhandsvis(el) {
+  if (el.matches('.alt button[data-f]')) {
+    if (el.disabled) return null;
+    const f = el.dataset.f, v = el.dataset.v, ny = { ...sel };
+    sel[f] === v ? delete ny[f] : ny[f] = v;
+    return treff(ny).map(i => i.id);
+  }
+  if (el.matches('[data-gruppe]')) {
+    const g0 = gruppe; gruppe = gruppe === el.dataset.gruppe ? null : el.dataset.gruppe;
+    const r = treff().map(i => i.id); gruppe = g0; return r;
+  }
+  const r = el.closest('.sc-y, [data-brikke]'); return r ? [r.dataset.id || r.dataset.brikke] : null;
+}
+
+/* ---------- Oppdater (ingen full re-render, så fokus og animasjon består) ---------- */
+function oppdater() {
+  const t = treff(), n = t.length, skjult = SC.length - n, ids = t.map(i => i.id);
+  SC.forEach(i => avvalgt.has(i.id) ? valgt.delete(i.id) : valgt.add(i.id));
+  $$('.alt button').forEach(b => {
+    const f = FASETT.find(x => x.id === b.dataset.f), v = b.dataset.v, på = sel[f.id] === v, c = treff({ ...sel, [f.id]: v }).length;
+    b.setAttribute('aria-pressed', på); b.disabled = c === 0 && !på;
+    const nrs = treff({ ...sel, [f.id]: v }).map(i => i.s.nr);
+    b.dataset.tipH = nrs.length ? (på ? 'Valgt: ' : '') + 'Scenario ' + nrs.join(', ') : 'Ingen scenarioer';
+    b.dataset.tip = nrs.length ? (på ? 'Trykk for å fjerne valget' : '') : 'Passer ikke med dine øvrige valg';
+    $('.n', b).textContent = c;
+  });
+  $('#besvart').textContent = `${antSvar()} av 3 besvart`;
+  $('[data-nullstill]').disabled = !antSvar() && !gruppe;
+  $$('.grp-t').forEach(b => b.setAttribute('aria-pressed', b.dataset.gruppe === gruppe));
+  const tittel = n === 0 ? 'Ingen scenarioer passer' : n === 1 ? 'Ett scenario passer' : (antSvar() || gruppe) ? `${n} av ${SC.length} scenarioer passer` : `${SC.length} scenarioer`;
+  const under = n === 1 ? `Scenario ${t[0].s.nr}: konklusjonen står under.` : (antSvar() || gruppe) ? `${skjult} er fjernet av svarene dine.` : 'Svar på spørsmålene under, så fjernes de som ikke passer.';
+  $('#tittel').textContent = tittel; $('#under').textContent = under;
+  const stor = $('#stor'); stor.textContent = n;
+  if (sistN !== null && sistN !== n) { stor.classList.remove('tikk'); void stor.offsetWidth; stor.classList.add('tikk'); }
+  sistN = n;
+  $('#valgte').innerHTML = (gruppe ? `<span class="pille">${esc(gruppe)}<button type="button" data-fjern-gruppe aria-label="Fjern valg: ${esc(gruppe)}">×</button></span>` : '') + FASETT.filter(f => sel[f.id]).map(f => `<span class="pille">${esc(f.valg.find(v => v[0] === sel[f.id])[1])}<button type="button" data-fjern="${f.id}" aria-label="Fjern valg: ${esc(f.valg.find(v => v[0] === sel[f.id])[1])}">×</button></span>`).join('');
+  $$('[data-brikke]').forEach(b => { const på = ids.includes(b.dataset.brikke); b.dataset.t = på ? 'passer' : 'borte'; b.setAttribute('aria-disabled', !på); });
+  oppdaterTre();
+  SC.forEach(i => {
+    const y = $(`.sc-y[data-id="${i.id}"]`), på = ids.includes(i.id), apen = på && erApen(i.id, t);
+    y.dataset.t = på ? 'passer' : 'borte';
+    const skjules = !på && !visSkjulte;
+    y.inert = skjules; y.setAttribute('aria-hidden', skjules);
+    const sc = $('.sc', y); sc.classList.toggle('apen', i.id in manuell ? manuell[i.id] : apen);
+    $('.exp', y).setAttribute('aria-expanded', sc.classList.contains('apen'));
+    $('.kropp-y', y).inert = !sc.classList.contains('apen');   // skjult innhold skal ikke kunne nås med tastatur
+    $('.arsak', y).textContent = på ? '' : `Passer ikke med: ${arsaker(i.id).join(', ')}`;
+    $('input[data-velg]', y).disabled = !på;
+  });
+  $('#liste').hidden = n === 0 && !visSkjulte;
+  $('#tom').hidden = n !== 0;
+  $('#skjulte').hidden = skjult === 0;
+  $('#skjulteTxt').textContent = `${skjult} skjult av valget`;
+  $('#skjulteKn').textContent = visSkjulte ? 'Skjul dem' : 'Vis dem';
+  document.body.classList.toggle('vis-skjulte', visSkjulte);
+  $('#apneAlle').textContent = n && t.every(i => $(`#sc-${i.id}`).classList.contains('apen')) ? 'Skjul alle konklusjoner' : 'Vis alle konklusjoner';
+  $('#apneAlle').hidden = !n;
+  $('#mobbar').innerHTML = `<span><b>${n}</b> av ${SC.length} scenarioer passer</span><a href="#svar" data-rull>Se svar</a>`;
+  $('#mobbar').hidden = visning !== 'scenarioer';
+  synk();
+}
+function etterSynk() {
+  const yv = valgt.has('yrk');
+  $$('.yb').forEach(b => b.classList.toggle('pdf', yv));
+  const v = synligeIds();
+  $$('.antall').forEach(e => e.textContent = `${v.filter(id => valgt.has(id)).length} av ${v.length} valgt`);
+}
+function vis(k) {
+  visning = 'scenarioer';
+  $$('#nav a').forEach(a => a.setAttribute('aria-current', a.dataset.sk === k ? 'page' : 'false'));
+  $('#mobbar').hidden = false;
+  $('#sb').classList.remove('apen'); $('#meny').setAttribute('aria-expanded', 'false');
+  if (k === 'yrk') $('#yrk-seksjon').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion:reduce)').matches ? 'auto' : 'smooth' }); else scrollTo(0, 0);
+  synk();
+}
+function init() {
+  valgt.delete('yrk');
+  $('#hoved').innerHTML = byggScenarioer();
+  $('#nav').innerHTML = [['scenarioer', 'Scenarioer', SC.length], ['yrk', 'Yrkesmessig utleie', '']].map(([k, t, n]) => `<a href="#/${k}" data-sk="${k}">${ikon[k]}<span>${t}</span>${n ? `<small class="tall">${n}</small>` : ''}</a>`).join('');
+  const fraHash = () => { const k = location.hash.replace('#/', ''); vis(k === 'yrk' ? 'yrk' : 'scenarioer'); };
+  window.addEventListener('hashchange', fraHash);
+  $('#meny').addEventListener('click', () => { const o = $('#sb').classList.toggle('apen'); $('#meny').setAttribute('aria-expanded', o); });
+  const veksle = id => { const sc = $(`#sc-${id}`); manuell[id] = !sc.classList.contains('apen'); oppdater(); };
+  const reduser = () => matchMedia('(prefers-reduced-motion:reduce)').matches;
+  document.addEventListener('change', e => { const id = e.target.dataset && e.target.dataset.velg; if (id && ITEM[id].type === 'scenario') { e.target.checked ? avvalgt.delete(id) : avvalgt.add(id); } });
+  document.addEventListener('click', e => {
+    const h = e.target.closest('[data-h]');
+    if (h) { const k = h.dataset.h; if (k === 'alle') avvalgt.clear(); if (k === 'ingen') SC.forEach(i => avvalgt.add(i.id)); if (k === 'synlige') { const s = synligeIds(); SC.forEach(i => s.includes(i.id) ? avvalgt.delete(i.id) : avvalgt.add(i.id)); } }
+    if (e.target.closest('[data-rull]')) { e.preventDefault(); $('#svar').scrollIntoView({ behavior: reduser() ? 'auto' : 'smooth' }); return; }
+    const br = e.target.closest('[data-brikke]');
+    if (br) {
+      const id = br.dataset.brikke; if (br.dataset.t === 'borte') return;
+      manuell[id] = true; oppdater();
+      const sc = $(`#sc-${id}`); sc.scrollIntoView({ behavior: reduser() ? 'auto' : 'smooth', block: 'center' });
+      sc.classList.remove('flash'); void sc.offsetWidth; sc.classList.add('flash'); return;
+    }
+    if (e.target.closest('#tre, #tre-reset')) { if (antSvar() || gruppe) { for (const k in sel) delete sel[k]; gruppe = null; oppdater(); } return; }
+    const gb = e.target.closest('[data-gruppe]');
+    if (gb) { gruppe = gruppe === gb.dataset.gruppe ? null : gb.dataset.gruppe; oppdater(); return; }
+    if (e.target.closest('[data-fjern-gruppe]')) { gruppe = null; oppdater(); return; }
+    const f = e.target.closest('[data-f]');
+    if (f) { const { f: id, v } = f.dataset; sel[id] === v ? delete sel[id] : sel[id] = v; oppdater(); return; }
+    const x = e.target.closest('[data-fjern]'); if (x) { const id = x.dataset.fjern; delete sel[id]; oppdater(); $(`.alt button[data-f="${id}"]`).focus(); return; }
+    if (e.target.closest('[data-nullstill]')) { for (const k in sel) delete sel[k]; gruppe = null; oppdater(); return; }
+    if (e.target.closest('[data-skjulte]')) { visSkjulte = !visSkjulte; oppdater(); return; }
+    if (e.target.closest('[data-apneAlle]')) {
+      const t = treff(), alle = t.every(i => $(`#sc-${i.id}`).classList.contains('apen'));
+      t.forEach(i => manuell[i.id] = !alle); oppdater(); return;
+    }
+    if (e.target.closest('[data-eks]')) { eksporter(ITEMS.filter(i => valgt.has(i.id) && (i.type !== 'scenario' || synligeIds().includes(i.id))).map(i => i.id), 'valgt'); return; }
+    const tg = e.target.closest('[data-tog]'); if (tg) veksle(tg.dataset.tog);
+  });
+  /* Hover-/fokus-tips */
+  const tips = document.createElement('div'); tips.id = 'tips'; tips.setAttribute('role', 'tooltip'); tips.hidden = true; document.body.appendChild(tips);
+  let tid = 0, mål = null;
+  const visTips = el => {
+    mål = el; tips.innerHTML = `<b>${esc(el.dataset.tipH || '')}</b>${el.dataset.tip ? `<span>${esc(el.dataset.tip)}</span>` : ''}`;
+    tips.hidden = false; tips.style.left = '0px'; tips.style.top = '0px';
+    const r = el.getBoundingClientRect(), w = tips.offsetWidth, h = tips.offsetHeight;
+    let x = r.left + r.width / 2 - w / 2; x = Math.max(8, Math.min(x, innerWidth - w - 8));
+    let y = el.classList.contains('brikke') ? r.bottom + 10 : r.top - h - 10; if (y < 8) y = r.bottom + 10;
+    if (el.closest('.sb')) { x = r.right + 12; y = Math.max(8, Math.min(r.top + r.height / 2 - h / 2, innerHeight - h - 8)); }
+    tips.style.left = x + 'px'; tips.style.top = y + 'px'; el.setAttribute('aria-describedby', 'tips');
+  };
+  const skjulTips = () => { clearTimeout(tid); if (mål) mål.removeAttribute('aria-describedby'); mål = null; tips.hidden = true; };
+  document.addEventListener('mouseover', e => { const el = e.target.closest('[data-tip-h]'); if (!el || el === mål) return; clearTimeout(tid); tid = setTimeout(() => visTips(el), 90); });
+  document.addEventListener('mouseout', e => { const el = e.target.closest('[data-tip-h]'); if (el && !el.contains(e.relatedTarget)) skjulTips(); });
+  document.addEventListener('focusin', e => { const el = e.target.closest('[data-tip-h]'); if (el) visTips(el); });
+  document.addEventListener('focusout', skjulTips);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') skjulTips(); });
+  window.addEventListener('scroll', skjulTips, { passive: true });
+  byggTre();
+  const korte = ['Fradragsrett', 'Reell utleie', 'Mva på leien'];
+  $('#sb-yrk').innerHTML = '<span class="sb-yrk-t">Yrkesmessig utleie</span><div class="sb-yrk-r">' + D.yrkesmessig_utleie.avsnitt.map((av, k) =>
+    `<button type="button" class="yb" data-yb data-tip-h="${esc(av[0].tekst)}" data-tip="" aria-label="${esc(av[0].tekst)}">${(yikon[k] || yikon[0]).replace('width="22" height="22"', 'width="16" height="16"')}<span>${korte[k] || ''}</span></button>`).join('') + '</div>';
+  /* Svak glød: det som tas med i PDF lyser når man holder musen over eksportknappene */
+  const eksIder = modus => modus === 'alt' ? ITEMS.map(i => i.id) : ITEMS.filter(i => valgt.has(i.id) && (i.type !== 'scenario' || synligeIds().includes(i.id))).map(i => i.id);
+  const glodAv = () => { $$('.glod').forEach(e => e.classList.remove('glod')); fokusTre(null); };
+  const glodPaa = modus => {
+    glodAv();
+    const ider = eksIder(modus), sc = ider.filter(x => x !== 'yrk');
+    if (ider.includes('yrk')) $$('.yb').forEach(b => b.classList.add('glod'));   // kun boksene i margen lyser
+    fokusTre(sc.length ? sc : null);
+  };
+  const eksKnapp = '[data-h="eksalt"], [data-eks]';
+  document.addEventListener('mouseover', e => { const b = e.target.closest(eksKnapp); if (b) glodPaa(b.matches('[data-eks]') ? 'valgte' : 'alt'); });
+  document.addEventListener('mouseout', e => { if (e.target.closest(eksKnapp) && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest(eksKnapp))) glodAv(); });
+  document.addEventListener('focusin', e => { const b = e.target.closest && e.target.closest(eksKnapp); if (b) glodPaa(b.matches('[data-eks]') ? 'valgte' : 'alt'); });
+  document.addEventListener('focusout', e => { if (e.target.closest && e.target.closest(eksKnapp)) glodAv(); });
+  document.addEventListener('click', e => { if (e.target.closest('.yb')) { location.hash = '#/yrk'; } });
+  const heroEl = $('.hero'), bil = $('#bil'), lys = $('.lys');
+  const passLys = () => {
+    if (!bil || !lys || !bil.clientWidth) return;
+    const W = bil.clientWidth, H = bil.clientHeight, ar = W / H, op = getComputedStyle(bil).objectPosition.split(' ').map(x => parseFloat(x) / 100);
+    let x0 = 0, y0 = 0, vbW = 1100, vbH = 619;
+    if (ar >= 1100 / 619) { vbH = 1100 / ar; y0 = (619 - vbH) * (op[1] ?? .5); } else { vbW = 619 * ar; x0 = (1100 - vbW) * (op[0] ?? .5); }
+    lys.setAttribute('viewBox', `${x0.toFixed(1)} ${y0.toFixed(1)} ${vbW.toFixed(1)} ${vbH.toFixed(1)}`);
+  };
+  const tennLys = () => { if (!lys) return; heroEl.classList.remove('paa'); void heroEl.getBoundingClientRect(); heroEl.classList.add('paa'); };
+  if (lys) {
+    passLys(); if (window.ResizeObserver) new ResizeObserver(passLys).observe(heroEl);
+    bil.complete ? tennLys() : bil.addEventListener('load', tennLys, { once: true });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') tennLys(); });
+  }
+  const hoverMål = '.sc-y, [data-brikke], .alt button[data-f], [data-gruppe]';
+  document.addEventListener('mouseover', e => { if (e.target.closest('[data-h="eksalt"], [data-eks]')) return; const r = e.target.closest(hoverMål); fokusTre(r ? forhandsvis(r) : null); });
+  document.addEventListener('mouseout', e => { if (e.target.closest('[data-h="eksalt"], [data-eks]')) return; if (!e.relatedTarget || !e.relatedTarget.closest || !e.relatedTarget.closest(hoverMål)) fokusTre(null); });
+  document.addEventListener('focusin', e => { const r = e.target.closest && e.target.closest(hoverMål); if (r) fokusTre(forhandsvis(r)); });
+  document.addEventListener('focusout', () => fokusTre(null));
+  fraHash(); requestAnimationFrame(() => requestAnimationFrame(oppdater));
+}

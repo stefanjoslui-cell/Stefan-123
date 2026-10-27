@@ -1,0 +1,51 @@
+/* Utskriftsdokument */
+#utskrift,#toast{display:none}
+#toast.vis{display:block;position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 18px;border-radius:var(--r-sm);font-size:14px;z-index:999}
+@media print{
+  @page{size:A4;margin:24mm 18mm 20mm}
+  @page{@top-left{content:"Bauda · MVA-behandling utleiebiler og demobiler";font:9pt "Segoe UI",Arial,sans-serif;color:#032A3F}
+        @bottom-right{content:"Side " counter(page) " av " counter(pages);font:9pt "Segoe UI",Arial,sans-serif;color:#6B6560}}
+  @page forside{margin:0;@bottom-right{content:none}}
+  @page :first{@top-left{content:none}@top-right{content:none}}
+  html,body{background:#fff}
+  body{-webkit-print-color-adjust:exact;print-color-adjust:exact;font-size:11pt;line-height:1.5}
+  body>*:not(#utskrift){display:none!important}
+  #utskrift{display:block}
+  .u-forside{page:forside;height:297mm;padding:26mm 22mm 20mm;background:#fff;color:#2E2113;page-break-after:always;break-after:page;position:relative}
+  .u-forside h1{color:#2E2113;font-size:34pt;font-weight:300;margin:62mm 0 6mm;line-height:1.1;letter-spacing:-.01em}
+  .u-forside .ut{font-size:15pt;color:#5b6066;margin:0}
+  .u-forside .ma{position:absolute;left:22mm;right:22mm;bottom:20mm;font-size:10pt;color:#5b6066}
+  .u-forside .bil-u{position:absolute;left:22mm;width:calc(100% - 44mm);bottom:34mm;height:92mm;object-fit:cover;object-position:42% 62%;border-radius:2mm}
+  .u-forside .lock{display:flex;align-items:center;gap:7mm}
+  .u-forside .strek-u{width:.3mm;height:16mm;background:#c3c8ce}
+  .u-forside .bdo-u svg{display:block;height:15mm;width:auto}
+  .u-forside .bauda{font-size:46pt;font-weight:300;letter-spacing:-.02em;color:#2E2113;line-height:1}
+  .u-forside .bauda i{display:inline-block;width:.2em;height:.2em;border-radius:50%;background:#032A3F;margin-left:.07em}
+  .u-toc{page-break-after:always;break-after:page}
+  .u-topp{margin:0 0 8mm;padding-bottom:6mm;border-bottom:.3pt solid #c3c8ce}
+  .u-topp .lock{display:flex;align-items:center;gap:4.5mm}
+  .u-topp .bauda{font-size:22pt;font-weight:300;letter-spacing:-.02em;color:#2E2113;line-height:1}
+  .u-topp .bauda i{display:inline-block;width:.2em;height:.2em;border-radius:50%;background:#032A3F;margin-left:.07em}
+  .u-topp .strek-u{width:.3mm;height:9mm;background:#c3c8ce}
+  .u-topp .bdo-u svg{display:block;height:8mm;width:auto}
+  .u-topp h1{font-size:17pt;font-weight:300;color:#2E2113;margin:7mm 0 1.5mm;line-height:1.15}
+  .u-topp .ut{margin:0;font-size:10pt;color:#5b6066}
+  .u-liste{list-style:none;margin:5mm 0 0;padding:0}
+  .u-liste li{display:flex;gap:6mm;padding:1.4mm 0;border-top:.3pt solid #DCDAD7;font-size:10pt}
+  .u-liste li b{font-weight:400;color:#032A3F;min-width:24mm}
+  .u-toc h2{font-size:22pt;margin-bottom:8mm}
+  .u-toc ol{list-style:none;margin:0;padding:0}
+  .u-toc li{padding:2.2mm 0;border-bottom:.3pt solid #DCDAD7;display:flex;gap:6mm}
+  .u-toc li b{font-weight:400;color:#032A3F;min-width:22mm}
+  .u-toc .fm{margin-top:8mm;font-size:10pt;background:#EDEDED;padding:3mm 4mm}
+  .u-side{break-inside:avoid;page-break-inside:avoid;margin:0 0 9mm;padding-top:5mm;border-top:.3pt solid #c3c8ce}
+  .u-side:first-of-type{border-top:0;padding-top:0}
+  .u-side .gruppe{font-size:10pt;color:#6B6560;margin-bottom:3mm}
+  .u-side h2{font-size:18pt;margin-bottom:6mm}
+  .u-side h3{font-size:10pt;font-weight:600;color:#032A3F;margin:7mm 0 2mm;text-transform:none}
+  .u-side .kon{border-left:1.2mm solid #032A3F;padding-left:5mm}
+  .u-side p{orphans:3;widows:3}
+  .u-side .fotnote{margin-top:4mm;font-size:10pt;color:#2B2B2B}
+  .u-side li{break-inside:avoid}
+  .u-side a{color:#032A3F;word-break:break-all;font-size:9pt}
+}
