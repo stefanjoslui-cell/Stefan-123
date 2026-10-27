@@ -371,7 +371,7 @@ main{padding:1.5rem 2rem 5rem;min-width:0;max-width:1240px;width:100%}
 /* Tilordning av scenarioer til spørsmålene i beslutningstreet (utledet av ordlyden i scenariooverskriftene).
    null = scenarioet setter ingen vilkår på dette spørsmålet. */
 const FASETT = [
-  { id: 'bruk', q: 'Hva skjer med bilen?', valg: [['utleie', 'Leies ut som utleiebil'], ['demo', 'Brukes som demobil'], ['firma', 'Leies ut fra Bauda Mobility og brukes som firmabil hos forhandler / Bauda']] },
+  { id: 'bruk', q: 'Hva skjer med bilen?', valg: [['utleie', 'Leies ut som utleiebil'], ['demo', 'Brukes som demobil'], ['firma', 'Leies ut fra Bauda og brukes som firmabil hos forhandler / Bauda']] },
   { id: 'kjt', q: 'Hva slags kjøretøy er det?', valg: [['fossil', 'Fossilt personkjøretøy'], ['el', 'Elektrisk personkjøretøy'], ['varebil', 'Varebil klasse 2']] },
   { id: 'tid', q: 'Hvor lenge leies bilen ut?', valg: [['under', 'Under 30 dager'], ['over', 'Over 30 dager']] }
 ];
@@ -394,8 +394,8 @@ const SAMMENDRAG = {
   s4: ['Utleie under 30 dager, elektrisk', 'Utleien faktureres med mva (25 %). Ikke fradragsrett ved bruk til verksted eller demobil.'],
   s5: ['Utleie av varebil klasse 2', 'Utleien faktureres med mva (25 %). Brukes den som demobil: egne regler med fradragsrett.'],
   s6: ['Demobil, personkjøretøy', 'Uttaksmva i eget selskap. Forhandler har ikke fradragsrett.'],
-  s7: ['Demobil, varebil klasse 2', 'Ingen uttaksmva. Forhandler har fradragsrett.'],
-  s8: ['Firmabil hos forhandler / Bauda', 'Utleien faktureres med mva (25 %). Over 30 dager: andel. Elbil-reglene for over 30 dager gjelder.']
+  s7: ['Demobil, varebil klasse 2', 'Uttaksmva beregnes i eget selskap (egne regler for elbil). Forhandler har ikke fradragsrett.'],
+  s8: ['Firmabil hos forhandler / Bauda', 'Utleien faktureres etter reglene i scenario 1. Uttaksmva beregnes i eget selskap, og forhandler har ikke fradragsrett.']
 };
 const sel = {};
 let gruppe = null;   // «Utleie» eller «Andre forhold» når brukeren trykker på gruppeoverskriften
