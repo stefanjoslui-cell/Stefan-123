@@ -238,14 +238,14 @@
    "konklusjon": [
     [
      {
-      "tekst": "Skal ikke beregnes uttaks mva i eget selskap. Hvis leie fra Bauda Mobility fakturer Bauda Mobility i hht til gjeldene regler, og forhandler har fradragsrett for inngående mva. **",
+      "tekst": "Skal beregnes uttaks mva i eget selskap, egne regler for uttaksmva for elbiler hvor fritaksgrensen skal hensyntas. \nFor 2026  Uttaksmva=(alminnelig omsetningsverdi−300000)×25%  \nHvis leie fra Bauda Mobility fakturer Bauda Mobility i hht til gjeldene regler, og forhandler har ikke fradragsrett for inngående mva. **",
       "farge": "rod"
      }
     ]
    ],
    "fotnote": [
     {
-     "tekst": "** Forutsetter at selskapet har behov for bilen i virksomheten – kan lages egen slide for reglene her også",
+     "tekst": "** Forutsetter at selskapet har behov for bilen i virksomhet. F.eks demobil i forbindelse med salg av nye biler, eller annet bruk i virksomheten.",
      "farge": "rod"
     }
    ],
@@ -265,7 +265,7 @@
    "tabell": 2,
    "problemstilling": [
     {
-     "tekst": "Bilen leies ut fra Bauda Mobility og brukes som firmabil hos forhandler / Bauda ",
+     "tekst": "Bilen leies ut fra Bauda og brukes som firmabil hos forhandler / Bauda ",
      "farge": "sort"
     }
    ],
@@ -278,13 +278,13 @@
    "konklusjon": [
     [
      {
-      "tekst": "Utleien faktureres med mva (25%). Over 30 dager – andel ",
+      "tekst": "Utleien fakturer i hht til gjeldene regler omtalt under scenario 1 - \"Leies ut som utleiebil\"",
       "farge": "sort"
      }
     ],
     [
      {
-      "tekst": "Fradragsrett på inngående mva på kostnader knyttet til bilen når det faktisk brukes i utleievirksomhet. Brukes bilene av forhandler til verksted drift, demobil etc – så ikke fradragsrett ",
+      "tekst": "Skal beregnes uttaks mva i eget selskap. Hvis leie fra Bauda Mobility fakturer Bauda Mobility i hht til gjeldene regler, og forhandler har ikke fradragsrett for inngående mva.\nVarebil klasse 2 - egne regler - se omtale under demobil - tilsvarende gjelder her.\n",
       "farge": "rod"
      }
     ]
