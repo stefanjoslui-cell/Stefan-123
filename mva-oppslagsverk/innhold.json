@@ -208,7 +208,13 @@
    "konklusjon": [
     [
      {
-      "tekst": "Skal beregnes uttaks mva i eget selskap. Hvis leie fra Bauda Mobility fakturer Bauda Mobility i hht til gjeldene regler, og forhandler har ikke fradragsrett for inngående mva. ",
+      "tekst": "Skal beregnes uttaks mva i eget selskap, egne regler for uttaksmva for elbiler hvor fritaksgrensen skal hensyntas. For 2026  Uttaksmva=(alminnelig omsetningsverdi−300000)×25%  ",
+      "farge": "rod"
+     }
+    ],
+    [
+     {
+      "tekst": "Hvis leie fra Bauda Mobility fakturer Bauda Mobility i hht til gjeldene regler, og forhandler har ikke fradragsrett for inngående mva.",
       "farge": "rod"
      }
     ]
