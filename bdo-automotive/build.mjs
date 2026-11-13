@@ -148,6 +148,7 @@ html, body { margin: 0; height: 100%; background: #0B111A; overflow: hidden; }
 <body>
 <div id="stage"><canvas id="film" width="1920" height="1080"></canvas></div>
 ${audioTag}
+${logoTag()}
 <script>${bundle}</script>
 <script>${playerJs}</script>
 </body>
@@ -156,11 +157,21 @@ ${audioTag}
 
   const outDir = abs('dist');
   fs.mkdirSync(outDir, { recursive: true });
-  const out = path.join(outDir, 'BDO-Automotive-Hele-bildet.html');
+  const out = path.join(outDir, (JSON.parse(readText('film.json')).output || 'BDO-Automotive-Hele-bildet') + '.html');
   fs.writeFileSync(out, html);
   const bytes = fs.statSync(out).size;
   console.log(`wrote ${out}`);
   console.log(`size: ${(bytes / 1048576).toFixed(2)} MiB (${bytes} bytes)`);
+}
+
+// The official BDO logo, if it has been dropped into the shared brand folder (../brand/bdo-logo.svg|png).
+function logoTag() {
+  for (const [f, mime] of [['../brand/bdo-logo.svg', 'image/svg+xml'], ['../brand/bdo-logo.png', 'image/png']]) {
+    const p = path.join(ROOT, f);
+    if (fs.existsSync(p)) { console.log(`logo: ${f}`); return `<script>window.BDO_LOGO="data:${mime};base64,${fs.readFileSync(p).toString('base64')}";</script>`; }
+  }
+  console.log('logo: none in brand/ (typographic fallback)');
+  return '';
 }
 
 main().catch((err) => {

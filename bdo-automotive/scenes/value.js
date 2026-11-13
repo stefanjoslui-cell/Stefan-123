@@ -263,10 +263,10 @@ function redLine(ctx, t) {
   // head position
   let d = head, hp = all[0]; for (let i = 1; i < all.length; i++) { const a = all[i - 1], b = all[i], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (d <= L) { hp = [lerp(a[0], b[0], d / (L || 1)), lerp(a[1], b[1], d / (L || 1))]; break; } d -= L; hp = b; }
   const fb = E.inOutCubic(prog(t, 190.8, 191.5));
-  if (fb > 0) { ctx.fillStyle = C.red; ctx.fillRect(R.bx - 3, R.top, 6, barLen * fb); hp = [R.bx, lerp(R.top, R.bot, fb)]; }
+  if (fb > 0 && !K.hasLogo()) { ctx.fillStyle = C.red; ctx.fillRect(R.bx - 3, R.top, 6, barLen * fb); hp = [R.bx, lerp(R.top, R.bot, fb)]; }
   const dotA = 1 - ss(191.4, 191.8, t);
   if (dotA > 0) K.redDot(ctx, hp[0], hp[1], 8, dotA);
-  if (t >= 191.5) { ctx.fillStyle = C.red; ctx.fillRect(R.bx - 3, R.top, 6, barLen); }
+  if (t >= 191.5 && !K.hasLogo()) { ctx.fillStyle = C.red; ctx.fillRect(R.bx - 3, R.top, 6, barLen); }
   return R;
 }
 
@@ -320,8 +320,11 @@ function act7(ctx, t) {
   if (t >= 191) {
     const dx = t > 193 ? Math.sin(t * 0.9) * 1.5 : 0, dy = t > 193 ? Math.cos(t * 0.7) * 1 : 0;
     const wp = E.inOutCubic(prog(t, 191.0, 192.7));
-    ctx.save(); ctx.translate(dx, dy); ctx.beginPath(); ctx.rect(m.x0 - 40, m.base - m.asc - 30, (m.w + 80) * wp, m.asc + 80); ctx.clip();
-    setFont(ctx, m.size, 800, K.DISPLAY); ctx.fillStyle = C.blue; ctx.textBaseline = 'alphabetic'; ctx.fillText('BDO', m.x0, m.base); ctx.restore();
+    if (K.hasLogo()) K.drawLogo(ctx, W / 2 + dx, m.base - m.asc / 2 + dy, m.asc * 1.05, { wipe: wp });
+    else {
+      ctx.save(); ctx.translate(dx, dy); ctx.beginPath(); ctx.rect(m.x0 - 40, m.base - m.asc - 30, (m.w + 80) * wp, m.asc + 80); ctx.clip();
+      setFont(ctx, m.size, 800, K.DISPLAY); ctx.fillStyle = C.blue; ctx.textBaseline = 'alphabetic'; ctx.fillText('BDO', m.x0, m.base); ctx.restore();
+    }
   }
   K.line(ctx, 'Vi ser detaljene. Vi forstår helheten.', W / 2, 650, t, { size: 44, weight: 300, color: C.graphite, t0: 191.6, align: 'center' });
   K.line(ctx, 'TETT PÅ BILBRANSJEN', W / 2, 712, t, { size: 22, weight: 500, color: C.blue, t0: 192.4, align: 'center', track: 0.28, family: K.MONO });

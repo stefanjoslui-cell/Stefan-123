@@ -16,6 +16,7 @@ const HITS = [...world.HITS, ...data.HITS, ...value.HITS].sort((a, b) => a[0] - 
 M.film({
   fonts: [M.font(100, 600, K.DISPLAY), M.font(100, 300, K.DISPLAY), M.font(40, 500, K.MONO)],
   hits: HITS,
+  async init() { await K.loadLogo(); },
   samples: 6,
   draw(ctx, u, t) { scene(t).draw(ctx, t); },
   post(ctx, u, t) { K.grain(ctx, t, scene(t).sheetAt ? scene(t).sheetAt(t) : 0); },

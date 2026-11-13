@@ -140,3 +140,34 @@ export function grain(ctx, t, k) {
   ctx.fillStyle = k < 0.5 ? 'rgba(255,255,255,0.035)' : 'rgba(38,52,69,0.03)';
   for (let i = 0; i < 1400; i++) ctx.fillRect(r() * W, r() * H, 1.5, 1.5);
 }
+
+// ---------------------------------------------------------------- the official BDO logo
+// The logo file lives in <repo>/brand/bdo-logo.svg (or .png). The packed HTML inlines it as
+// window.BDO_LOGO; the dev server/renderer loads it from ../brand/. Until the file is there,
+// drawLogo() sets a plain typographic stand-in so the end card still composes.
+let LOGO = null, LOGO_TRIED = false;
+export async function loadLogo() {
+  if (LOGO_TRIED) return LOGO;
+  LOGO_TRIED = true;
+  const srcs = typeof window !== 'undefined' && window.BDO_LOGO ? [window.BDO_LOGO] : ['../brand/bdo-logo.svg', '../brand/bdo-logo.png'];
+  for (const src of srcs) {
+    try { const im = new Image(); im.src = src; await im.decode(); if (im.naturalWidth) { LOGO = im; break; } } catch { /* try next */ }
+  }
+  return LOGO;
+}
+export const hasLogo = () => !!LOGO;
+// Draw the logo with its visual centre at (cx, cy), height h px. wipe 0..1 reveals it left->right.
+// Returns the drawn box {x, y, w, h}.
+export function drawLogo(ctx, cx, cy, h, { alpha = 1, wipe = 1 } = {}) {
+  let w;
+  if (LOGO) w = (h * LOGO.naturalWidth) / LOGO.naturalHeight;
+  else { ctx.save(); ctx.font = M.font(h * 1.18, 800, DISPLAY); w = ctx.measureText('BDO').width; ctx.restore(); }
+  const x = cx - w / 2, y = cy - h / 2;
+  if (alpha <= 0 || wipe <= 0) return { x, y, w, h };
+  ctx.save(); ctx.globalAlpha *= alpha;
+  ctx.beginPath(); ctx.rect(x - 4, y - h, (w + 8) * clamp(wipe), h * 3); ctx.clip();
+  if (LOGO) ctx.drawImage(LOGO, x, y, w, h);
+  else { ctx.font = M.font(h * 1.18, 800, DISPLAY); ctx.fillStyle = C.blue; ctx.textBaseline = 'middle'; ctx.fillText('BDO', x, cy + h * 0.04); }
+  ctx.restore();
+  return { x, y, w, h };
+}
