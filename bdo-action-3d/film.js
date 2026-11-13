@@ -609,6 +609,13 @@ function shot(ctx, u, sh, o = {}) {
 
 // ------------------------------------------------------------------ transitions (all on the beat; B is on screen at the cut frame)
 const MAXR = 2400;
+let OFFC = null;
+function viaOff(ctx, u, sh, clipFn) {      // render B off-screen once, then blit it through the clip (one cheap clipped op)
+  if (!OFFC) { OFFC = document.createElement('canvas'); OFFC.width = W; OFFC.height = H; }
+  const o = OFFC.getContext('2d'); o.setTransform(1, 0, 0, 1, 0, 0); o.globalAlpha = 1; o.textBaseline = 'alphabetic';
+  shot(o, u, sh);
+  ctx.save(); clipFn(); ctx.drawImage(OFFC, 0, 0); ctx.restore();
+}
 const edge = (ctx, col, w) => { ctx.strokeStyle = col; ctx.lineWidth = w; };
 const TR = {
   whip(ctx, u, A, B, lu, tr) {          // both on screen, sliding together; motion blur does the rest
@@ -619,13 +626,13 @@ const TR = {
     const e = 0.3 + 0.7 * E.outCubic(prog(lu, 0, tr.d)), sx = W * (1 - e);
     ctx.save(); ctx.translate(-W * 0.3 * e, 0); shot(ctx, u, A); ctx.restore();
     const pts = []; for (let i = 0; i <= 18; i++) { const y = (H * i) / 18; pts.push([sx + 70 * Math.sin(i * 1.7 + 1) * (1 - 0.4 * e) + 40 * (K.hash01(i, 4) - 0.5), y]); }
-    ctx.save(); ctx.beginPath(); ctx.moveTo(W + 100, -10); pts.forEach(([x, y], i) => ctx.lineTo(x, y)); ctx.lineTo(W + 100, H + 10); ctx.closePath(); ctx.clip(); shot(ctx, u, B); ctx.restore();
+    viaOff(ctx, u, B, () => { ctx.beginPath(); ctx.moveTo(W + 100, -10); pts.forEach(([x, y]) => ctx.lineTo(x, y)); ctx.lineTo(W + 100, H + 10); ctx.closePath(); ctx.clip(); });
     ctx.save(); ctx.lineJoin = 'round'; edge(ctx, C.red, 7); ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke(); ctx.restore();
   },
   iris(ctx, u, A, B, lu, tr) {          // B opens from a point (the red dot of A) and becomes the frame
     const e = prog(lu, 0, tr.d), r = tr.r0 + (MAXR - tr.r0) * E.inQuad(e), [x, y] = tr.at;
     shot(ctx, u, A);
-    ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.clip(); shot(ctx, u, B); ctx.restore();
+    viaOff(ctx, u, B, () => { ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.clip(); });
     if (r < 2000) ring(ctx, x, y, r, 8, C.red);
   },
   diag(ctx, u, A, B, lu, tr) {          // 35 degree wipe, the angle of the BDO cornerstone, growing from the bottom right
@@ -633,7 +640,7 @@ const TR = {
     const th = (W * n[0] + H * n[1]) * (1 - e) - 4, o = [n[0] * th, n[1] * th];   // a point on the edge line
     const P1 = [o[0] - d[0] * 3000, o[1] - d[1] * 3000], P2 = [o[0] + d[0] * 3000, o[1] + d[1] * 3000], Q2 = [P2[0] + n[0] * 3000, P2[1] + n[1] * 3000], Q1 = [P1[0] + n[0] * 3000, P1[1] + n[1] * 3000];
     shot(ctx, u, A);
-    ctx.save(); ctx.beginPath(); ctx.moveTo(...P1); ctx.lineTo(...P2); ctx.lineTo(...Q2); ctx.lineTo(...Q1); ctx.closePath(); ctx.clip(); shot(ctx, u, B); ctx.restore();
+    viaOff(ctx, u, B, () => { ctx.beginPath(); ctx.moveTo(...P1); ctx.lineTo(...P2); ctx.lineTo(...Q2); ctx.lineTo(...Q1); ctx.closePath(); ctx.clip(); });
     if (e < 0.98) { ctx.save(); edge(ctx, C.red, 6); ctx.beginPath(); ctx.moveTo(...P1); ctx.lineTo(...P2); ctx.stroke(); ctx.restore(); }
   },
   stopDot(ctx, u, A, B, lu, tr) {       // the full stop of A flies on and becomes the red point of B
@@ -646,7 +653,7 @@ const TR = {
     if (tr.find) { const g = geom(ctx, A), q = g.counter; if (q) { at = [q.x, q.y]; r0 = q.r; } else at = [W / 2, H / 2]; }
     const e = prog(lu, 0, tr.d), smax = Math.max(MAXR / r0 * 1.05, 2), s = Math.exp(Math.log(smax) * E.inQuad(e)), r = r0 * s;
     ctx.save(); ctx.translate(at[0], at[1]); ctx.scale(s, s); ctx.translate(-at[0], -at[1]); shot(ctx, u, A); ctx.restore();
-    ctx.save(); ctx.beginPath(); ctx.arc(at[0], at[1], r, 0, 7); ctx.clip(); shot(ctx, u, B); ctx.restore();
+    viaOff(ctx, u, B, () => { ctx.beginPath(); ctx.arc(at[0], at[1], r, 0, 7); ctx.clip(); });
     if (r < 2000) ring(ctx, at[0], at[1], r, Math.max(3, 7 * Math.sqrt(s) * 0.6), C.red);
   },
   slide(ctx, u, A, B, lu, tr) {         // same frame change, A's letters slide out while B's slide in
