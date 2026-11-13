@@ -97,6 +97,17 @@ function ledgerPage(ctx, { off, col, alpha, size = 40, pitch = 78, hl = -1, hlCo
 
 // batched data field (same look as K.field, one path per alpha bucket: ~10x cheaper)
 const BUCKET = K.PTS.map((p) => Math.min(3, Math.floor(p.z * 4)));
+const SC = {}, SC0 = 12;
+function siteC(ctx, { k = 0, cx = 0, cy = 0, s = 10, alpha = 1 } = {}) {
+  const key = k < 0.5 ? 0 : 1;
+  if (!SC[key]) {
+    const cv = document.createElement('canvas'); cv.width = 176 * SC0; cv.height = 106 * SC0; const c = cv.getContext('2d');
+    c.save(); c.translate(cv.width / 2 - W / 2, cv.height / 2 - H / 2); world.site(c, { k: key, cx: 0, cy: 0, s: SC0, alpha: 1 }); c.restore(); SC[key] = cv;
+  }
+  const cv = SC[key], sc = s / SC0;
+  ctx.save(); ctx.globalAlpha *= alpha; ctx.imageSmoothingQuality = 'low';
+  ctx.translate(W / 2 - cx * s, H / 2 - cy * s); ctx.scale(sc, sc); ctx.drawImage(cv, -cv.width / 2, -cv.height / 2); ctx.restore();
+}
 const FCACHE = {};
 function fieldCache(k) {
   const key = k < 0.5 ? 0 : 1;
@@ -111,12 +122,14 @@ function fieldCache(k) {
     for (let i = 1; i < K.NPTS; i++) { if (BUCKET[i] !== bk) continue; const r = PT[i].r; b.moveTo(PT[i].x + r, PT[i].y); b.arc(PT[i].x, PT[i].y, r, 0, 7); }
     b.fill();
   }
-  return (FCACHE[key] = { lk, pk });
+  const both = mk(), d = both.getContext('2d'); d.drawImage(lk, 0, 0); d.drawImage(pk, 0, 0);
+  return (FCACHE[key] = { lk, pk, both });
 }
 function FF(ctx, k, { alpha = 1, pos = null, links = 1, red = 1 } = {}) {
   const col = k < 0.5 ? C.cloud : C.blue, PT = K.PTS;
   if (!pos) {
     const fc = fieldCache(k);
+    if (links >= 0.75 && links <= 1.25) { ctx.save(); ctx.globalAlpha *= clamp(alpha); ctx.drawImage(fc.both, 0, 0); ctx.restore(); K.redDot(ctx, PT[0].x, PT[0].y, 7, red); return; }
     ctx.save(); if (links > 0) { ctx.globalAlpha *= clamp(alpha * links); ctx.drawImage(fc.lk, 0, 0); } ctx.globalAlpha = ctx.globalAlpha; ctx.restore();
     ctx.save(); ctx.globalAlpha *= clamp(alpha); ctx.drawImage(fc.pk, 0, 0); ctx.restore();
     K.redDot(ctx, PT[0].x, PT[0].y, 7, red);
@@ -211,10 +224,10 @@ const IM = {
   whip(ctx, c) {
     const e = E.inOutCubic(prog(c.p, 0, 1)), cx = lerp(-50, 55, e), v = Math.abs(55 + 50) * 6 * Math.sin(Math.PI * c.p) * 0.012;
     ctx.save();
-    for (const g of [-1, 0, 1]) { if (g && v < 0.25) continue; ctx.globalAlpha = g ? 0.45 : 1; (g ? world.siteFast : world.site)(ctx, { k: 0, cx: cx + g * v * 4, cy: 18, s: 42 }); }
+    for (const g of [-1, 0, 1]) { if (g && v < 0.25) continue; ctx.globalAlpha = g ? 0.45 : 1; siteC(ctx, { k: 0, cx: cx + g * v * 4, cy: 18, s: 26 }); }
     ctx.restore();
   },
-  plan(ctx, c) { world.siteFast(ctx, { k: c.L.k, cx: 0, cy: 13, s: 12.5 + c.p * 1.6, alpha: c.L.id === 'B' ? 0.7 : 0.9 }); },
+  plan(ctx, c) { siteC(ctx, { k: c.L.k, cx: 0, cy: 13, s: 12.5 + c.p * 1.6, alpha: c.L.id === 'B' ? 0.7 : 0.9 }); },
   planClose(ctx, c) { world.site(ctx, { k: c.L.k, cx: -6 + c.p * 12, cy: 12 + c.p * 3, s: 64, alpha: c.L.id === 'B' ? 0.8 : 1 }); },
   dept(d) {
     return (ctx, c) => {
@@ -353,7 +366,7 @@ const IM = {
   siteFor(ctx, c) { world.site(ctx, { k: c.L.k, cx: -6 + c.p * 10, cy: -29, s: 24 + c.p * 5 }); },
   siteBack(ctx, c) {
     const e = E.inOutCubic(prog(c.ls, 0, 0.95 * 4 * P)), s = lerp(34, 10.8, e);
-    (s <= 18 ? world.siteFast : world.site)(ctx, { k: 1, cx: 0, cy: lerp(10, 0, e), s });
+    (s <= 18 ? siteC : world.site)(ctx, { k: 1, cx: 0, cy: lerp(10, 0, e), s });
     const [x, y] = toScreen(0, lerp(10, 0, e), s, 0, 12); disc(ctx, x, y, 9, C.red); ring(ctx, x, y, 16 + 10 * e, 2, rgba(C.red, 0.8));
   },
   numDots(ctx, c) {   // 1 300 points, one per company
@@ -443,7 +456,7 @@ const odo = { from: NF('1,5 %'), to: NF('1,7 %'), t0: 0.28 };
 S('ÉN.', 2, 'N', 'slam', IM.dot, { align: 'l', dx: 40, sfx: 'impact', shake: 14 });
 S('TRANSAKSJON.', 3, 'A', 'letters', IM.ledger, { dy: -90, sfx: 'thud', hits: [[0.5, 'amount', 'tick']], ...T('iris', 0.9, { at: [1420, 540], r0: 230 }) });
 S('ÉN.', 2, 'N', 'crop', IM.wheel, { sfx: 'thud', shake: 12, ...T('stopDot', 0.7, { to: [714, 708], r: 14 }) });
-S('BIL.', 3, 'A', 'U', IM.car, { dy: -190, sfx: 'thud', shake: 8, hits: [[1.8, 'car drawn', 'pop', { pitch: 'A4' }]], ...T('pushIris', 1.1, { at: [671, 738], r0: 333, smax: 8 }) });
+S('BIL.', 3, 'A', 'U', IM.car, { dy: -190, sfx: 'thud', shake: 8, hits: [[1.8, 'car drawn', 'pop', { pitch: 'A4' }]], ...T('pushIris', 1.1, { at: [671, 738], r0: 440, smax: 8 }) });
 S('TUSEN.', 2, 'N', 'R', IM.whip, { sfx: 'thud', ...T('whip', 0.6, { dir: [-1, 0] }) });
 S('BILER.', 2, 'A', 'snap', IM.plan, { sfx: 'thud', shake: 10, ...T('diag', 0.6) });
 S('BILER.', 2, 'N', 'echo', IM.planClose, { sfx: 'click', shake: 6 });
@@ -697,7 +710,7 @@ M.film({
   fonts: [M.font(100, 800, DISPLAY), M.font(100, 300, DISPLAY), M.font(40, 500, MONO)],
   hits: HITS,
   samples: (t) => { const u = t / P; if (u >= END) return 1; const s = stage(u); return s.inTr ? 4 : s.sh.hold ? 2 : 3; },
-  async init() { await K.loadLogos(); const c = document.createElement('canvas').getContext('2d'); world.siteFast(c, { k: 0 }); world.siteFast(c, { k: 1 }); },
+  async init() { await K.loadLogos(); const c = document.createElement('canvas').getContext('2d'); siteC(c, { k: 0 }); siteC(c, { k: 1 }); },
   draw(ctx, u, t) {
     if (u >= END) { endCard(ctx, u); return; }
     const s = stage(Math.max(0, u));
