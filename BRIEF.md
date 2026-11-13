@@ -24,13 +24,13 @@ Tone: teknologien hjelper revisor å se mer og prioritere riktig; den tar ALDRI 
 - `HITS = [[beat, 'label', sfx, opts?], ...]` i beats (`t / period`), én per visuell aksent. sfx: tick, click, pop, whoosh, swell, riser, bell, blip, sub, thud, impact, crash.
 - `samples` (bevegelsesuskarphet) ≤ 6. Hver frame må tegnes på < 30 ms i Chromium (sjekk!).
 
-## Visuell identitet – «Future Clarity» (streng)
-Arctic White #F5F7FA, Pure White #FFFFFF, Cloud Blue #DCE5F0, BDO Blue #204399 (dominerende digital farge), BDO Red #EC1B3C
-(KUN signaturpunkt/-linje, markerte punkter og små aksenter – sparsomt), Graphite #263445 (tekst på lyst), Light Blue #6B8CC8, Soft Teal #55B7B0 (sjelden).
-Mørke ark (#0B111A) for den fysiske verden, lyse ark for data/plattform/kundeverdi. Skandinavisk, rent, presist: tynne linjer (1–2 px), luft,
-svakt tegnenett. Ingen neon, ingen glød på UI, ingen fargerike gradienter, ingen ikoner, ingen PowerPoint-bokser med piler,
-ingen sentrerte titler på gradient, ingen tekst som bare toner inn (ting tegnes på, glir inn med retning, eller springer).
-INGEN 3D-bilmodeller – biler er arkitekt-/teknisk tegning (linjer) eller rene grafiske former.
+## Visuell identitet – BDOs offisielle fargeprofil (streng)
+BDO Red #E81A3B (Pantone 185) · BDO Blue #22409A (Pantone 287) · BDO Charcoal #333333 (Cool Grey 11) · BDO Slate #5B6E7F (174+10)
+· BDO Burgundy #98002E (208) · BDO Pale Charcoal #E7E7E7 · hvit. Arbeidstoner: lyst ark #F7F7F7, mørkt ark #17191C.
+BDO Blue er dominerende digital farge; rødt KUN for signaturpunkt/-linje og markeringer; Charcoal for tekst på lyst; Slate for sekundære linjer/etiketter;
+Burgundy sjelden. I kit.js: K.C.red/blue/charcoal/slate/burgundy/pale (+ alias cloud→pale, graphite→charcoal, light/teal→slate).
+Skandinavisk, rent, presist: tynne linjer, luft. Ingen neon, ingen glød på UI, ingen fargerike gradienter, ingen ikoner,
+ingen PowerPoint-bokser, ingen tekst som bare toner inn. INGEN 3D-bilmodeller.
 
 ## Ekte tall (kun disse – ikke finn på andre)
 BDO Bilbransjeanalysen 2025: driftsmargin merkeforhandlere 1,5 % (2023) → 1,7 % (2024); bruktbilforhandlere 2,5 % (2024);

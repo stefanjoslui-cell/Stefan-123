@@ -142,7 +142,7 @@ async function main() {
 <title>${escapeHtml(title)}</title>
 <style>
 ${fontCss}
-html, body { margin: 0; height: 100%; background: #0B111A; overflow: hidden; }
+html, body { margin: 0; height: 100%; background: #17191C; overflow: hidden; }
 </style>
 </head>
 <body>

@@ -32,7 +32,7 @@ const CAR = (() => {
   return { body, glass, roof, detail };
 })();
 const TONE_N = [0.34, 0.34, 0.24, 0.16, 0.1, 0.06, 0.06, 0.2];           // night: paint as cloud-white wash
-const TONE_D = ['#FFFFFF', '#FFFFFF', '#F5F7FA', '#E9EEF5', '#DCE5F0', '#C9D3E0', '#B9C5D6', '#B4C6E4'];
+const TONE_D = ['#FFFFFF', '#FFFFFF', '#F7F7F7', '#EFEFEF', '#E7E7E7', '#D6D6D6', '#C6C6C6', '#BFC6CE'];
 function carPlan(ctx, cam, x, y, rot, tone, k, a = 1, detail = true) {
   const [px, py] = toScreen(cam.cx, cam.cy, cam.s, x, y);
   if (px < -200 || px > W + 200 || py < -200 || py > H + 200) return;

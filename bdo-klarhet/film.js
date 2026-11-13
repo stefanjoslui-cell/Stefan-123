@@ -169,7 +169,7 @@ const planX = (wx) => PL.ox + wx * PL.s, planY = (wy) => PL.oy + wy * PL.s;
 function buildSite() {
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const c = cv.getContext('2d', { willReadFrequently: true });
-  c.fillStyle = '#F5F7FA'; c.fillRect(0, 0, W, H);
+  c.fillStyle = '#F7F7F7'; c.fillRect(0, 0, W, H);
   site(c, { k: 1, cx: (W / 2 - PL.ox) / PL.s, cy: (H / 2 - PL.oy) / PL.s, s: PL.s });
   window.__site = cv;
   const d = c.getImageData(0, 0, W, H).data, r = rnd(31);

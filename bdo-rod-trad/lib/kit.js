@@ -3,7 +3,12 @@
 // world, bright sheets for the digital one) with a single red point as the signature.
 import * as M from './motion.js';
 export const W = 1920, H = 1080;
-export const C = { arctic: '#F5F7FA', white: '#FFFFFF', cloud: '#DCE5F0', blue: '#204399', red: '#EC1B3C', graphite: '#263445', light: '#6B8CC8', teal: '#55B7B0', night: '#0B111A' };
+// BDO's official colour profile (Pantone/CMYK/RGB from the BDO brand portal) + two neutral working tones.
+// red 185, blue 287, charcoal Cool Grey 11, slate 174+10, burgundy 208, pale charcoal.
+export const C = { red: '#E81A3B', blue: '#22409A', charcoal: '#333333', slate: '#5B6E7F', burgundy: '#98002E', pale: '#E7E7E7',
+  white: '#FFFFFF', arctic: '#F7F7F7', night: '#17191C',
+  // role aliases used by the scenes (mapped onto the official colours)
+  cloud: '#E7E7E7', graphite: '#333333', light: '#5B6E7F', teal: '#5B6E7F' };
 export const DISPLAY = 'Display', MONO = 'Mono';
 export const { clamp, lerp, prog, E, mix, hash01, noise1, mulberry32, spring, SPRING, kf } = M;
 export const ss = (a, b, x) => { const t = clamp((x - a) / (b - a)); return t * t * (3 - 2 * t); };

@@ -11,7 +11,7 @@
   const SKIP_S = 5;
 
   const css = `
-    :root { --bg:#0B111A; --ink:#F5F7FA; --cloud:#DCE5F0; --blue:#204399; --red:#EC1B3C; --slate:#263445; }
+    :root { --bg:#17191C; --ink:#F7F7F7; --cloud:#E7E7E7; --blue:#22409A; --red:#E81A3B; --slate:#333333; }
     html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
     #stage { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg);
       color: var(--ink); font-family: Display, sans-serif; }
