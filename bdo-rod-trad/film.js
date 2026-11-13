@@ -61,7 +61,7 @@ wp(632, 47.5); wp(646, 40); wp(660, 34); wp(672, 32); wp(678.5, FLAGS[1].y + 3.2
 loop(FLAGS[1].x, FLAGS[1].y, FLAGS[1].r, 'p2');
 wp(700, 34); wp(708, 46); wp(713, 56); wp(717, 57.2); wp(722, 57.2);
 loop(FLAGS[2].x, FLAGS[2].y, FLAGS[2].r, 'p3');
-wp(740, 57.2); wp(752, 55); wp(770, 48); wp(792, 38, 'cEnd'); wp(812, 31); wp(824, 28.8); wp(832, 29.6, 'conv0'); wp(833.6, 33.5); wp(829.5, 37.5);
+wp(740, 57.2); wp(752, 55); wp(770, 46); wp(788, 33, 'cEnd'); wp(804, 25); wp(819, 21); wp(830, 21.8, 'conv0'); wp(833, 26); wp(832.4, 31.5); wp(829.6, 36.6);
 // chapter 6: stitching between the two columns
 const MX = 830, ROWS = [40, 47, 54];
 wp(826, ROWS[0], 'sL0'); wp(830, ROWS[0] + 0.3); wp(834, ROWS[0], 'sR0'); wp(831.5, 43.5); wp(827.5, 45); wp(826, ROWS[1], 'sL1'); wp(830, ROWS[1] + 0.3); wp(834, ROWS[1], 'sR1');
@@ -121,32 +121,39 @@ const XT = (() => { const o = []; let mx = -1e9; for (let t = 0; t <= 75; t += 0
 const timeAtX = (x) => { for (let i = 0; i < XT.length; i++) if (XT[i][1] >= x) return XT[i][0]; return 75; };
 
 // ------------------------------------------------------------------ camera: follows the tip, log-space zoom
-const lnS = pchip([[0, 100], [4, 106], [7, 140], [9, 230], [14.4, 240], [18.4, 17], [20, 17], [21.8, 34], [28.2, 34], [31.4, 10.3], [33, 10.8], [35, 12.8], [37, 13], [38.5, 14], [42.5, 14],
+const lnS = pchip([[0, 100], [4, 106], [7, 140], [9, 230], [14.4, 240], [18.4, 15], [20, 15], [21.8, 30], [28.2, 30], [31.4, 10.3], [33, 10.8], [35, 12.8], [37, 13], [38.5, 14], [42.5, 14],
   [44, 12.5], [56.5, 12.5], [58.4, 17], [63, 17.4], [66, 17]].map(([t, s]) => [t, Math.log(s)]));
 const txK = pchip([[0, 960], [28, 960], [29.5, 1380], [32, 1420], [34, 960], [60, 960]]);
-const tyK = pchip([[0, 430], [8, 380], [10, 300], [14, 300], [17, 430], [21, 450], [28, 450], [30, 520], [34, 440], [38, 400], [44, 360], [46, 380], [56, 380], [58, 400], [62, 380], [66, 400]]);
+const tyK = pchip([[0, 430], [8, 380], [10, 300], [14, 300], [16.5, 520], [19.8, 520], [21.5, 600], [28, 600], [30, 520], [34, 440], [38, 440], [41, 520], [46, 380], [56, 380], [58, 400], [62, 380], [66, 400]]);
 function follow(t) {
   let fx = 0, fy = 0; const N = 9;
-  for (let i = 0; i < N; i++) { const p = tipPos(t + 0.3 + (1.4 * i) / (N - 1)); fx += p[0]; fy += p[1]; }
+  for (let i = 0; i < N; i++) { const p = tipPos(t + 0.15 + (0.85 * i) / (N - 1)); fx += p[0]; fy += p[1]; }
   fx /= N; fy /= N;
   const s = Math.exp(lnS(t));
   return { cx: fx - (txK(t) - 960) / s, cy: fy - (tyK(t) - 540) / s, s };
 }
 function zoomBlend(A, B, w) {
-  const s = Math.exp(lerp(Math.log(A.s), Math.log(B.s), w)), k = (1 / s - 1 / A.s) / (1 / B.s - 1 / A.s);
+  const s = Math.exp(lerp(Math.log(A.s), Math.log(B.s), w)), dn = 1 / B.s - 1 / A.s, k = Math.abs(dn) < 1e-9 ? w : (1 / s - 1 / A.s) / dn;
   return { cx: lerp(A.cx, B.cx, k), cy: lerp(A.cy, B.cy, k), s };
 }
 const OVER = { cx: 490, cy: -6, s: 1.72 };
 const SHEET = { x0: -30, y0: -100, x1: 1010, y1: 100 };
 let cam = null, LOGOW = 400;
 const finalCam = () => { const s = 40, dotX = 960 - LOGOW / 2 - 64; return { s, cx: END[0] - (dotX - 960) / s, cy: END[1] - (430 - 540) / s }; };
+const MC = { x: pchip([[27.6, 150], [29.5, 190], [31.2, 215], [33.8, 365], [37.5, 395]]), y: pchip([[27.6, -30], [31.2, -30], [33.8, -18], [37.5, -18]]),
+  s: pchip([[29, 10.3], [31.4, 10.3], [33.8, 11.6], [37.5, 11.6]].map(([t, s]) => [t, Math.log(s)])) };
 function camera(t) {
   let c = follow(t);
+  const wm = ss(27.6, 30.0, t) * (1 - ss(37.0, 38.8, t));
+  if (wm > 0) c = zoomBlend(c, { cx: MC.x(t), cy: MC.y(t), s: Math.exp(MC.s(t)) }, wm);
+  const wk = ss(37.6, 38.8, t) * (1 - ss(43.6, 44.8, t)), wy = ss(43.6, 45, t) * (1 - ss(57.6, 58.8, t)), wc = ss(58.0, 59.6, t) * (1 - ss(64.6, 65.8, t));
+  c = { ...c, cx: lerp(lerp(c.cx, 524, wk), 830, wc), cy: lerp(lerp(c.cy, 46, wy), 51.5, wc) };
   const w1 = E.inOutCubic(prog(t, 66.0, 68.4)), w2 = E.inOutCubic(prog(t, 69.3, 72.3));
   if (w1 > 0) c = zoomBlend(c, OVER, w1);
   if (w2 > 0) c = zoomBlend(OVER, finalCam(), w2);
   return c;
 }
+const kz = (ref) => clamp(cam.s / ref);
 const P = (x, y) => [W / 2 + (x - cam.cx) * cam.s, H / 2 + (y - cam.cy) * cam.s];
 const visible = (x0, y0, x1, y1, m = 0) => !(P(x1, y1)[0] < -m || P(x0, y0)[0] > W + m || P(x1, y1)[1] < -m || P(x0, y0)[1] > H + m);
 
@@ -208,7 +215,7 @@ function drawLedger(ctx, t) {
     ctx.fillStyle = i === 3 ? G : i === 0 ? rgba(LB, 0.9) : rgba(G, 0.26);
     ctx.fillText(row(r), x, y);
   });
-  const [hx, hy] = P(0, -2.7 * 0.95 - 0.55 + 0.95 * 0); ctx.fillStyle = rgba(LB, 0.5); ctx.fillRect(hx, P(0, -2.1)[1], 16.2 * S, 1.2);
+  ctx.fillStyle = rgba(LB, 0.5); ctx.fillRect(P(0, 0)[0], P(0, -2.4)[1], 16.2 * S, 1.2);
   ctx.restore();
 }
 
@@ -300,7 +307,8 @@ function drawSite(ctx, t) {
     ctx.strokeStyle = rgba(BL, 0.95 * a); ctx.lineWidth = 1.6; ctx.strokeRect(x, y, w, h);
   }
   // kicker + data labels popping out of each department
-  for (let i = 0; i < 6; i++) {
+  const kS = clamp((cam.s - 12) / 12); ctx.save(); ctx.globalAlpha *= kS;
+  for (let i = 0; i < 6 && kS > 0.02; i++) {
     const t0 = TD[i], out = t0 + 3.1; if (t < t0 - 0.8 || t > out) continue;
     const [kx, ky] = P(OX - 57 + 19 * i + 1.3, -49.2);
     K.kicker(ctx, world.DEPTS[i], kx, ky, t, { color: BL, t0: t0 - 0.7, out, size: 24 });
@@ -315,6 +323,7 @@ function drawSite(ctx, t) {
       tag(ctx, txt, lx, ly, t, tj + 0.12, out, { size: 24, color: G });
     });
   }
+  ctx.restore();
 }
 
 // ------------------------------------------------------------------ chapter 4: braid + data platform
@@ -346,16 +355,16 @@ const STRANDS = (() => {
   return out;
 })();
 const PLATES = ['KJØRETØYDATA', 'TRANSAKSJONER', 'ØKONOMISKE DATA'];
-const PLATE_T0 = [31.4, 32.0, 32.6];
+const PLATE_T0 = [32.0, 32.5, 33.0];
 function plateGeom(j) {
   const cy = PY + 22 - 22 * j, hh = 7, lean = 6;
   return { cy, tl: [PX - 48 + lean, cy - hh], tr: [PX + 48 + lean, cy - hh], br: [PX + 48, cy + hh], bl: [PX - 48, cy + hh] };
 }
 function drawPlatform(ctx, t) {
   if (t < 29 || !visible(PX - 60, PY - 52, PX + 62, PY + 40, 30)) return;
-  const S = cam.s;
+  const S = cam.s, kp = kz(11), ka = ss(0.4, 0.75, kp);
   for (let j = 0; j < 3; j++) {
-    const g = plateGeom(j), rp = E.inOutCubic(prog(t, PLATE_T0[j], PLATE_T0[j] + 1.9)); if (rp <= 0) continue;
+    const g = plateGeom(j), rp = E.inOutCubic(prog(t, PLATE_T0[j], PLATE_T0[j] + 1.8)); if (rp <= 0) continue;
     const pierceT = markT(['pc0', 'pc1', 'pc2'][j]), lit = E.outCubic(prog(t, pierceT - 0.5, pierceT + 0.3));
     const pts = [g.bl, g.br, g.tr, g.tl].map(([x, y]) => P(x, y));
     ctx.save();
@@ -380,7 +389,7 @@ function drawPlatform(ctx, t) {
     ctx.restore();
     // the label above the plate's top-left corner
     const [lx, ly] = P(g.tl[0] - 0.4, g.tl[1] - 1.4);
-    tag(ctx, PLATES[j], lx, ly, t, pierceT - 0.3, 1e9, { size: 24, color: BL, weight: 600, halo: 8 });
+    if (ka > 0) { ctx.save(); ctx.globalAlpha *= ka; tag(ctx, PLATES[j], lx, ly, t, pierceT - 0.3, 1e9, { size: 24 * kp, color: BL, weight: 600, halo: 8 }); ctx.restore(); }
   }
   // vertical links between the plates, dashed
   const la = ss(33.6, 35, t);
@@ -392,7 +401,7 @@ function drawPlatform(ctx, t) {
     }
     ctx.stroke(); ctx.restore();
   }
-  K.kicker(ctx, 'BDO dataplattform', P(PX - 42, PY - 48)[0], P(PX - 42, PY - 48)[1], t, { color: BL, t0: markT('pEnter') - 0.5, out: markT('kTop') + 0.8, size: 26 });
+  if (ka > 0) { ctx.save(); ctx.globalAlpha *= ka; K.kicker(ctx, 'BDO dataplattform', P(PX - 42, PY - 48.5)[0], P(PX - 42, PY - 48.5)[1], t, { color: BL, t0: markT('pEnter') - 0.5, out: markT('kTop') + 0.8, size: 26 * kp }); ctx.restore(); }
 }
 function drawStrands(ctx, t) {
   if (t < 29) return;
@@ -415,19 +424,23 @@ const KNOW = [
 ];
 function drawKnow(ctx, t) {
   if (t < 35 || !visible(KX - 4, -70, KX + 60, 30, 20)) return;
-  const S = cam.s, RY = [-56, -29, -2];
+  const S = cam.s, RY = [-56, -29, -2], kk = kz(13), ka = ss(0.4, 0.75, kk);
   const hp = E.outCubic(prog(t, markT('kTop') - 0.2, markT('kTop') + 0.6));
-  K.kicker(ctx, 'Bransjekunnskap', P(KX + 4, -62.2)[0], P(KX + 4, -62.2)[1], t, { color: BL, t0: markT('kTop') - 0.3, out: markT('kEnd') + 1.6, size: 24 });
+  ctx.save(); ctx.globalAlpha *= ka;
+  K.kicker(ctx, 'Bransjekunnskap', P(KX + 4, -62.2)[0], P(KX + 4, -62.2)[1], t, { color: BL, t0: markT('kTop') - 0.3, out: markT('kEnd') + 1.6, size: 24 * kk });
+  ctx.restore();
   KNOW.forEach((k, i) => {
     const t0 = markT('rule' + (i + 1)) - 0.15;
     const rp = E.outCubic(prog(t, t0, t0 + 0.9));
     if (rp > 0) { ctx.strokeStyle = rgba(LB, 0.9); ctx.lineWidth = 1; ctx.beginPath(); const a = P(KX, RY[i]), b = P(KX + 56 * rp, RY[i]); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+    ctx.save(); ctx.globalAlpha *= ka;
     const [nx, ny] = P(KX + 3, RY[i] + 12.2);
-    K.line(ctx, k.n, nx, ny, t, { size: clamp(9.5 * S, 60, 150), weight: 300, color: BL, t0: t0 + 0.1, dur: 0.9 });
+    K.line(ctx, k.n, nx, ny, t, { size: clamp(9.5 * S, 60 * kk, 150), weight: 300, color: BL, t0: t0 + 0.1, dur: 0.9 });
     const [lx, ly] = P(KX + 3, RY[i] + 17.4);
-    K.line(ctx, k.l, lx, ly, t, { size: 30, weight: 500, color: G, t0: t0 + 0.35 });
+    K.line(ctx, k.l, lx, ly, t, { size: 30 * kk, weight: 500, color: G, t0: t0 + 0.35 });
     const [sx, sy] = P(KX + 3, RY[i] + 21.4);
-    K.line(ctx, k.s.toUpperCase(), sx, sy, t, { size: 21, weight: 500, color: LB, t0: t0 + 0.55, family: MONO, track: 0.08 });
+    K.line(ctx, k.s.toUpperCase(), sx, sy, t, { size: 21 * kk, weight: 500, color: LB, t0: t0 + 0.55, family: MONO, track: 0.08 });
+    ctx.restore();
   });
   void hp;
 }
@@ -452,15 +465,15 @@ const LANE = (() => {
 })();
 function drawChart(ctx, t) {
   if (t < 40 || !visible(CH.x0 - 40, 10, CH.x0 + 270, 64, 40)) return;
-  const S = cam.s, x1 = CH.x0 + 200;
+  const S = cam.s, x1 = CH.x0 + 200, kc = kz(11), ka = ss(0.4, 0.75, kc);
   ctx.save(); ctx.lineJoin = 'round'; ctx.lineCap = 'butt';
   const t0 = markT('c0') - 3.2, ap = E.outCubic(prog(t, t0, t0 + 2.2));
   // month gridlines + axis
   ctx.strokeStyle = rgba(CL, 1); ctx.lineWidth = 1; ctx.beginPath();
   for (let m = 0; m <= 12; m++) { const x = CH.x0 + m * CH.mw, a = P(x, 16.5), b = P(x, 60.5 - (1 - ap) * 44); ctx.moveTo(a[0], a[1]); ctx.lineTo(a[0], lerp(a[1], b[1], ap)); }
   ctx.stroke();
-  if (S > 8) for (let m = 0; m < 12; m++) { const [mx, my] = P(CH.x0 + (m + 0.5) * CH.mw, 60); mono(ctx, MONTHS[m], mx, my + 4, 20, rgba(LB, ap), { align: 'center', track: 0.12 }); }
-  K.kicker(ctx, 'Analyse · tolv måneder', P(CH.x0, 12.2)[0], P(CH.x0, 12.2)[1], t, { color: BL, t0: t0 + 0.2, out: 56.8, size: 24 });
+  if (ka > 0) for (let m = 0; m < 12; m++) { const [mx, my] = P(CH.x0 + (m + 0.5) * CH.mw, 60); mono(ctx, MONTHS[m], mx, my + 4, 20 * kc, rgba(LB, ap * ka), { align: 'center', track: 0.12 }); }
+  if (ka > 0) { ctx.save(); ctx.globalAlpha *= ka; K.kicker(ctx, 'Analyse · tolv måneder', P(CH.x0, 12.2)[0], P(CH.x0, 12.2)[1], t, { color: BL, t0: t0 + 0.2, out: 56.8, size: 24 * kc }); ctx.restore(); }
   for (let j = 0; j < 5; j++) {
     const y = CH.lanes[j], a = P(CH.x0, y + 1.9), b = P(x1, y + 1.9);
     ctx.strokeStyle = rgba(LB, 0.55); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(lerp(a[0], b[0], ap), a[1]); ctx.stroke();
@@ -480,19 +493,19 @@ function drawChart(ctx, t) {
     }
   }
   // lane names, sticky at the left of the screen while the chart is under the camera
-  const la = win(t, 44.2, 57.0, 0.8, 1.0);
+  const la = win(t, 44.2, 57.0, 0.8, 1.0) * ka;
   if (la > 0) {
     ctx.save(); ctx.globalAlpha *= la;
-    for (let j = 0; j < 5; j++) { const [, yy] = P(0, CH.lanes[j] + 1.9); mono(ctx, CH.names[j], Math.max(104, Math.min(P(CH.x0 - 2, 0)[0], 104) + 0), yy - 8, 22, G, { track: 0.1, halo: 9 }); }
+    for (let j = 0; j < 5; j++) { const [, yy] = P(0, CH.lanes[j] + 1.9); mono(ctx, CH.names[j], 104, yy - 8, 22, rgba(G, 0.85), { track: 0.1, halo: 9 }); }
     ctx.restore();
   }
   // the three flagged points
   for (const f of FLAGS) {
-    const tp = markT(f.name), [px, py] = P(f.x, f.y - 0.2), q = spr(t - tp - 0.3);
-    ctx.fillStyle = rgba(BL, 0.9 * (1 - ss(tp, tp + 0.5, t))); ctx.beginPath(); ctx.arc(px, py, 4, 0, 7); ctx.fill();
+    const tp = markT(f.name), [px, py] = P(f.x, f.y - 0.2), q = spr(t - tp - 0.3) * Math.max(kc, 0.4);
+    ctx.fillStyle = rgba(BL, 0.9 * (1 - ss(tp, tp + 0.5, t))); ctx.beginPath(); ctx.arc(px, py, 4 * Math.max(kc, 0.4), 0, 7); ctx.fill();
     if (q > 0) { ctx.fillStyle = RED; ctx.beginPath(); ctx.arc(px, py, 6.5 * q, 0, 7); ctx.fill(); }
     const tt = tp + 1.1, tq = E.outCubic(prog(t, tt, tt + 0.5));
-    if (tq > 0) {
+    if (tq > 0 && ka > 0.05) {
       const lx = px + 22, ly = py + 9;
       ctx.save(); ctx.font = M.font(24, 500, DISPLAY); const w = ctx.measureText(f.text).width; ctx.restore();
       const bw = (w + 30) * tq, bh = 42;
@@ -512,7 +525,8 @@ const VAL_R = ['Mer tid til faglige vurderinger', 'Risiko vurdert på riktig ste
 const VAL_K = ['Relevant innsikt i egen drift', 'Bedre forståelse av lønnsomhet', 'Dialog om det som betyr noe'];
 function drawConv(ctx, t) {
   if (t < 54 || !visible(MX - 60, 26, MX + 60, 62, 20)) return;
-  const S = cam.s, tc = markT('conv0') - 1.0, tag_ = (t_) => t_ - 0.0;
+  const S = cam.s, tc = markT('conv0') - 1.0, tag_ = (t_) => t_ - 0.0, kv = kz(16), ka = ss(0.4, 0.75, kv);
+  ctx.save(); ctx.globalAlpha *= ka;
   const [lx0, hy] = P(822.5, 33), [rx0] = P(837.5, 33);
   K.line(ctx, 'VERDI FOR REVISOR', lx0, hy, t, { size: 24, weight: 500, color: BL, t0: tc, family: MONO, align: 'right', track: 0.12 });
   K.line(ctx, 'VERDI FOR KUNDEN', rx0, hy, t, { size: 24, weight: 500, color: BL, t0: tc + 0.15, family: MONO, track: 0.12 });
@@ -528,19 +542,18 @@ function drawConv(ctx, t) {
       const a = P(x0, ROWS[i] - 0.1), b = P(lerp(x0, x1, q), ROWS[i] - 0.1); ctx.strokeStyle = rgba(RED, 0.9); ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
     }
   }
-  void tag_; void S;
+  ctx.restore(); void tag_; void S;
 }
 
 // ------------------------------------------------------------------ overview labels (the payoff view)
-const OVL = [[17, 'Transaksjon · bil'], [145, 'Virksomheten'], [380, 'Dataplattform'], [524, 'Bransjekunnskap'], [640, 'Analyse'], [830, 'Verdi'], [945, 'BDO']];
+const OVL = [[-6, 'Transaksjon · bil'], [60, 'Virksomheten'], [330, 'Dataplattform'], [496, 'Bransjekunnskap'], [600, 'Analyse'], [800, 'Verdi'], [930, 'BDO']];
 function drawOverview(ctx, t) {
   const a = ss(2.6, 1.9, cam.s) * ss(66.4, 68.2, t) * (1 - ss(70.4, 71.6, t));
   if (a <= 0.01) return;
   OVL.forEach(([x, str], i) => {
-    const [sx, sy] = P(x, 78); ctx.save(); ctx.globalAlpha *= a;
-    ctx.fillStyle = rgba(G, 0.4); ctx.fillRect(sx, sy - 34, 1, 22);
-    mono(ctx, String(i + 1).padStart(2, '0'), sx + 8, sy - 20, 18, RED, { track: 0.1 });
-    mono(ctx, str.toUpperCase(), sx + 8, sy, 20, G, { track: 0.12 });
+    const [sx, sy0] = P(x, 80), sy = sy0 + (i % 2) * 34; ctx.save(); ctx.globalAlpha *= a;
+    ctx.fillStyle = rgba(G, 0.4); ctx.fillRect(sx, sy0 - 30, 1, 30 + (i % 2) * 34 + 6);
+    mono(ctx, String(i + 1).padStart(2, '0') + '  ' + str.toUpperCase(), sx + 8, sy, 18, G, { track: 0.1 });
     ctx.restore();
   });
   const [tx, ty] = P(SHEET.x1 - 12, SHEET.y1 - 14);
@@ -568,7 +581,7 @@ const CAPS = [
   { s: ['Én transaksjon.'], a: 0.4, b: 7.6 },
   { s: ['Én bil. En hel historikk.'], a: 8.6, b: 15.6 },
   { s: ['Hele virksomheten.'], a: 17.6, b: 28.2 },
-  { s: ['Data fra alle systemer.', 'Samlet på ett sted.'], a: 30.0, b: 36.4 },
+  { s: ['Data fra alle systemer. Samlet på ett sted.'], a: 30.0, b: 36.4, size: 66 },
   { s: ['Bransjekunnskap gir forståelse.'], a: 37.8, b: 43.8 },
   { s: ['Teknologien viser hvor vi bør se.'], a: 46.0, b: 52.6 },
   { s: ['Revisor vurderer hva det betyr.'], a: 53.3, b: 58.8 },
@@ -584,7 +597,7 @@ function drawCaptions(ctx, t) {
   }
   for (const c of CAPS) {
     if (t < c.a - 0.05 || t > c.b) continue;
-    const size = c.s.length > 1 ? 76 : 80, two = c.s.length > 1;
+    const size = c.size || (c.s.length > 1 ? 76 : 80), two = c.s.length > 1;
     c.s.forEach((str, k) => K.line(ctx, str, K.CAP.x, two ? 860 + k * 70 : 930, t, { size, weight: 600, color: G, t0: c.a + k * 0.22, out: c.b }));
   }
 }
@@ -614,7 +627,7 @@ function drawAll(ctx, t) {
   drawCaptions(ctx, t);
   if (t > 71.6) {
     const q = E.outQuint(prog(t, 71.9, 72.9)); void q;
-    K.line(ctx, 'TETT PÅ BILBRANSJEN', K.CAP.x, 800, t, { size: 26, weight: 500, color: BL, t0: 72.0, family: MONO, track: 0.18 });
+    K.line(ctx, 'TETT PÅ BILBRANSJEN', W / 2, 590, t, { size: 30, weight: 500, color: BL, t0: 72.0, family: MONO, track: 0.2, align: 'center' });
   }
 }
 
