@@ -239,7 +239,7 @@ const IM = {
   },
   bars(ctx, c) {
     for (let i = 0; i < 9; i++) {
-      const q = E.outBack(prog(c.ls, i * 0.05, i * 0.05 + 0.22), 1.6), hgt = (260 + i * 62 + K.hash01(i, 3) * 40) * q, w = 150, x = 96 + i * 190;
+      const q = E.outBack(prog(c.ls, i * 0.04, i * 0.04 + 0.2), 1.6) * 0.7 + 0.3, hgt = (260 + i * 62 + K.hash01(i, 3) * 40) * q, w = 150, x = 96 + i * 190;
       ctx.fillStyle = rgba(C.cloud, 0.95); ctx.fillRect(x, 1000 - hgt, w, hgt); ctx.strokeStyle = C.graphite; lw(ctx, 2); ctx.strokeRect(x, 1000 - hgt, w, hgt);
       if (i === 8) disc(ctx, x + w / 2, 1000 - hgt - 6, 14 * q, C.red);
     }
@@ -332,7 +332,7 @@ S('TUSEN.', 1, 'B', 'slam', IM.planClose, { sfx: 'click', shake: 9 });
 S('BILER.', 2, 'A', 'D', IM.plan, { sfx: 'thud', shake: 10 });
 S('BILER.', 2, 'N', 'letters', IM.planClose, { sfx: 'click', shake: 6 });
 ['SALG.', 'LAGER.', 'VERKSTED.', 'DELER.', 'GARANTI.', 'SERVICE.'].forEach((w, i) =>
-  S(w, 1, i % 2 ? 'N' : 'A', ['L', 'R', 'slam', 'L', 'R', 'slam'][i], IM.dept(i), { sfx: 'click', shake: 7, dy: 0 }));
+  S(w, 1, i % 2 ? 'N' : 'A', ['L', 'R', 'slam', 'L', 'R', 'slam'][i], IM.dept(i), { sfx: 'click', shake: 7, dy: 0, samples: 3 }));
 S('ALT.', 2, 'A', 'slam', IM.fieldAll, { sfx: 'thud', shake: 12 });
 S('HENGER.', 2, 'B', 'R', IM.fieldPulse, { sfx: 'thud', shake: 8 });
 S('SAMMEN.', 3, 'N', 'slam', IM.net, { sfx: 'thud', shake: 10, hits: [0.15, 0.3, 0.45, 0.6, 0.8, 1.0, 1.2].map((h, i) => [h, 'link', 'tick', { pitch: 1200 + i * 110 }]) });
@@ -368,6 +368,8 @@ S('FOR.', 1, 'N', 'R', IM.siteFor, { sfx: 'click', shake: 6 });
 S('DEG.', 4, 'A', 'slam', IM.siteBack, { sfx: 'thud', shake: 12, hits: [[2.5, 'whole', 'swell', { len: 1.2 }]] });
 if (cur !== END) throw new Error('shot list ends at beat ' + cur + ', expected ' + END);
 
+const HEAVY = new Map([[IM.whip, 2], [IM.planClose, 3], [IM.plan, 2], [IM.siteFor, 3], [IM.siteBack, 3], [IM.fieldAll, 4], [IM.fieldPulse, 4], [IM.net, 4], [IM.explode, 4], [IM.fly, 4], [IM.zoomCluster, 4], [IM.labels, 4], [IM.converge, 4], [IM.picks, 4], [IM.numDots, 4]]);
+SH.forEach((s) => { s.samples = s.samples ?? HEAVY.get(s.im) ?? (/^(DATA|SAMMEN|VURDERER|HER)/.test(s.word) ? 4 : 6); if (s.im.name === '' || s.word.startsWith('SALG') ) {} });
 const STARTS = SH.map((s) => s.b);
 const shotAt = (u) => { let i = 0; for (let k = 0; k < SH.length; k++) if (STARTS[k] <= u) i = k; else break; return SH[i]; };
 
@@ -402,7 +404,7 @@ function drawWord(ctx, sh, c) {
       let gx = x0 + g.cx, gy = base, gs = 1, d = 0;
       if (sh.anim === 'letters') {
         d = 0.012 * i;
-        const q = E.outBack(prog(ls - d, 0, 0.14), 2.4); gs = 1 + 0.35 * (1 - q); gy = base - (1 - q) * 50;
+        const q = E.outBack(prog(ls - d, 0, 0.14), 2.4); gs = 1 + 0.12 * (1 - q); gy = base - (1 - q) * 50;
       }
       if (g.ch === '.' && i === lay.glyphs.length - 1) { const r = size * 0.088; disc(ctx, gx, gy - r, r * gs, L.dot); }
       else M.glyph(ctx, g.ch, gx, gy, f, L.fg, gs, gs);
@@ -466,7 +468,7 @@ HITS.sort((a, b) => a[0] - b[0]);
 M.film({
   fonts: [M.font(100, 800, DISPLAY), M.font(100, 300, DISPLAY), M.font(40, 500, MONO)],
   hits: HITS,
-  samples: 6,
+  samples: (t) => (t / P >= END ? 1 : (shotAt(t / P).samples ?? 6)),
   async init() { await K.loadLogo(); },
   draw(ctx, u, t) {
     if (u >= END) { endCard(ctx, u, t); return; }
