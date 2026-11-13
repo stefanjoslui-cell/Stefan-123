@@ -140,8 +140,8 @@ export function site(ctx, { k = 0, cx = 0, cy = 0, s = 10, alpha = 1 } = {}) {
 
 // ------------------------------------------------------------------ the hero car in side elevation
 // elevation coords: x forward, y up from the ground; world = (x, GROUND - y)
-const GROUND = 12.72;
-const EL = (() => {
+export const GROUND = 12.72;
+export const EL = (() => {
   const FA = [1.45, 0.345], RA = [-1.42, 0.345], AR = 0.41;
   const body = [
     ...K.bez([[-1.83, 0.3], [-2.22, 0.3], [-2.36, 0.34, -2.37, 0.5, -2.36, 0.62], [-2.35, 0.75, -2.33, 0.82, -2.3, 0.9], [-2.26, 0.99, -2.18, 1.04, -2.05, 1.08],

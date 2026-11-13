@@ -396,3 +396,6 @@ export function draw(ctx, t) {
   cap('Bransjekunnskap gir oss forståelse.', 43.9, 48.9, 930, { weight: 600, size: 62 });
   bransje(ctx, t);
 }
+
+// ---- extra exports for the action cut
+export { EL, GROUND, DOT, carPlan, rooms, lot, DEPTS, B, LOT };
