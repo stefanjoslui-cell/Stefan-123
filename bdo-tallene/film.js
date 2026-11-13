@@ -241,7 +241,7 @@ const BASE = 790, SC = 200;
 function s4(ctx, t) {
   bright(ctx, t);
   K.kicker(ctx, 'BDO Bilbransjeanalysen 2025', 160, 120, t, { color: C.blue, t0: 30.6 });
-  const exitB = ss(37.7, 38.5, t);
+  const exitB = ss(37.3, 38.0, t);
   // axis + gridlines
   const axA = E.outCubic(prog(t, 30.5, 31.3)) * (1 - exitB);
   if (axA > 0) {
@@ -267,7 +267,7 @@ function s4(ctx, t) {
     hl(ctx, BASE + 62, 660, 800, C.teal, 1.5); txt(ctx, 'BRUKTBIL', 660, BASE + 92, 20, 500, C.teal, FM, 'left', 0.1); ctx.restore();
   }
   // right column
-  const ex = 37.9;
+  const ex = 37.5;
   K.line(ctx, 'Driftsmargin', 1000, 300, t, { size: 84, weight: 800, color: INK, t0: 31.1, out: ex });
   K.line(ctx, 'merkeforhandlere', 1000, 392, t, { size: 84, weight: 300, color: C.blue, t0: 31.3, out: ex });
   K.line(ctx, '1,5 %', 1000, 590, t, { size: 140, weight: 800, color: INK, t0: 32.2, out: ex });
@@ -278,19 +278,19 @@ function s4(ctx, t) {
   K.kicker(ctx, 'Bruktbilforhandlere · 2024', 1000, 706, t, { color: C.teal, t0: 35.6, out: ex });
   K.line(ctx, '2,5 %', 1000, 836, t, { size: 140, weight: 800, color: C.teal, t0: 35.8, out: ex });
   // matrix
-  const cnt = Math.round(1300 * E.outCubic(prog(t, 38.9, 41.0)));
-  const mt = 38.9;
+  const cnt = Math.round(1300 * E.outCubic(prog(t, 38.3, 40.6)));
+  const mt = 38.3;
   for (let i = 0; i < NDOT; i++) {
     const col = i % 45, row = Math.floor(i / 45), td = mt + col * 0.045 + row * 0.003, p = E.outBack(prog(t, td, td + 0.4));
     if (p <= 0) continue;
     const r = 5.2 * p, isR = i === REDI;
     ctx.fillStyle = isR ? C.red : rgba(C.blue, 0.45 + 0.55 * hash01(i, 3)); ctx.beginPath(); ctx.arc(MX(i), MY(i), r, 0, 7); ctx.fill();
   }
-  if (t > 40.3) { const p = prog(t, 40.3, 41.0); K.redDot(ctx, MX(REDI), MY(REDI), 5.2, p); }
-  masked(ctx, t, 38.8, 42.6, 560, 170, () => { tabText(ctx, fmt(cnt) + '+', 160, 560, 170, 800, INK, 'left'); });
-  K.line(ctx, 'bilbransjebedrifter', 164, 626, t, { size: 44, weight: 300, color: C.blue, t0: 39.1, out: 42.6 });
-  K.line(ctx, 'analysert.', 164, 678, t, { size: 44, weight: 300, color: C.blue, t0: 39.25, out: 42.6 });
-  cap(ctx, t, 'Vi kjenner bransjen tallene kommer fra.', 38.9, 42.5);
+  if (t > 40.0) { const p = prog(t, 40.0, 40.7); K.redDot(ctx, MX(REDI), MY(REDI), 5.2, p); }
+  masked(ctx, t, 38.3, 42.6, 560, 170, () => { tabText(ctx, fmt(cnt) + '+', 160, 560, 170, 800, INK, 'left'); });
+  K.line(ctx, 'bilbransjebedrifter', 164, 626, t, { size: 44, weight: 300, color: C.blue, t0: 38.6, out: 42.6 });
+  K.line(ctx, 'analysert.', 164, 678, t, { size: 44, weight: 300, color: C.blue, t0: 38.75, out: 42.6 });
+  cap(ctx, t, 'Vi kjenner bransjen tallene kommer fra.', 38.5, 42.5);
 }
 
 // ================================================================== 5. THE ANALYSIS
@@ -299,9 +299,9 @@ const yc = (x) => 560 + 35 * Math.sin(((x - PX0) / 1520) * Math.PI * 2.2 + 0.6);
 const hw = (x) => 95 + 14 * Math.sin(x / 230);
 const gauss = (i) => Math.sqrt(-2 * Math.log(Math.max(1e-6, hash01(i, 6)))) * Math.cos(6.2832 * hash01(i, 7));
 const OUT = [
-  { i: REDI, x: 610, dy: -hw(610) - 140, label: 'Garantikrav uten arbeidsordre', side: 'r', t0: 46.9 },
+  { i: REDI, x: 610, dy: 270 - yc(610), label: 'Garantikrav uten arbeidsordre', side: 'r', t0: 46.9 },
   { i: 402, x: 1100, dy: hw(1100) + 120, label: 'Manuell rabatt over fullmakt', side: 'r', t0: 47.9 },
-  { i: 777, x: 1480, dy: -hw(1480) - 160, label: 'Bruktbil · lang lagertid', side: 'l', t0: 48.9 },
+  { i: 777, x: 1480, dy: 352 - yc(1480), label: 'Bruktbil · lang lagertid', side: 'l', t0: 48.9 },
 ];
 const SCAT = Array.from({ length: NDOT }, (_, i) => {
   const o = OUT.find((q) => q.i === i);
@@ -370,8 +370,8 @@ function s5(ctx, t) {
 
 // ================================================================== 6. VALUE
 const COLS = [
-  { x: 160, head: 'For revisor', pts: ['Målrettet revisjon', 'Mer tid til vurdering', 'Sporbar dokumentasjon'], dir: -1, d: 0 },
-  { x: 1040, head: 'For kunden', pts: ['Innsikt i egen drift', 'Bransjesammenligning', 'Færre overraskelser'], dir: 1, d: 0.45 },
+  { x: 160, head: 'For revisor', pts: ['Bedre oversikt over datagrunnlaget', 'Mer målrettede analyser', 'Mer tid til faglig vurdering'], dir: -1, d: 0 },
+  { x: 1040, head: 'For kunden', pts: ['Bedre oversikt over egen virksomhet', 'Mer relevant oppfølging', 'Tydeligere dialog om funn'], dir: 1, d: 0.45 },
 ];
 const ROWY = [320, 500, 680];
 function statement(ctx) {
@@ -384,10 +384,10 @@ function s6(ctx, t) {
   bright(ctx, t);
   const ex = 61.2;
   // centre rule
-  const ce = E.outCubic(prog(t, 55.0, 56.2)), ceo = 1 - E.inOutCubic(prog(t, 60.5, 61.5));
+  const ce = E.outCubic(prog(t, 55.0, 55.8)), ceo = 1 - E.inOutCubic(prog(t, 60.5, 61.5));
   if (ceo > 0) { const c = 515, h = 340 * ce * ceo; hl2(ctx, 960, c - h, c + h, C.blue, 2); }
   for (const col of COLS) {
-    const t0 = 55.8 + col.d;
+    const t0 = 55.3 + col.d;
     K.line(ctx, col.head.toUpperCase(), col.x, 220, t, { size: 64, weight: 800, color: INK, t0, out: ex });
     K.kicker(ctx, col.dir < 0 ? 'Revisjonsteamet' : 'Virksomheten', col.x, 148, t, { color: C.blue, t0: t0 - 0.1, out: ex });
     col.pts.forEach((p, k) => {
@@ -398,9 +398,10 @@ function s6(ctx, t) {
         hl(ctx, y, x0, lerp(x0, x1, rp), C.blue, 1.8);
       }
       txt2(ctx, t, `0${k + 1}`, col.x, y + 40, ty + 0.1, ex);
-      K.line(ctx, p, col.x, y + 120, t, { size: 52, weight: 600, color: INK, t0: ty + 0.15, out: ex });
+      K.line(ctx, p, col.x, y + 120, t, { size: 38, weight: 600, color: INK, t0: ty + 0.15, out: ex });
     });
   }
+  if (t > 57.2 && t < 61.2) { const f = E.inOutSine(1 - Math.abs(1 - 2 * ((t - 57.2) / 4) )) , a = ss(57.2, 57.8, t) * (1 - ss(60.6, 61.2, t)); ctx.fillStyle = rgba(C.blue, a); ctx.beginPath(); ctx.arc(960, 190 + 650 * f, 6, 0, 7); ctx.fill(); }
   // the statement
   const S = statement(ctx), t0 = 61.9, out = 67.35;
   if (t > 61.5) {
@@ -425,10 +426,10 @@ const TAG = 'Vi ser detaljene. Vi forstår helheten.';
 function landing(ctx) { ctx.font = M.font(56, 300, FD); const w = ctx.measureText(TAG).width; return [960 + w / 2 + 40, 600 - 18]; }
 function s7(ctx, t) {
   bright(ctx, t);
-  const wipe = E.outCubic(prog(t, 67.9, 68.9));
+  const wipe = E.outCubic(prog(t, 67.6, 68.5));
   K.drawLogo(ctx, 960, 390, 150, { alpha: 1, wipe });
-  K.line(ctx, TAG, 960, 600, t, { size: 56, weight: 300, color: INK, t0: 69.0, align: 'center' });
-  K.line(ctx, 'TETT PÅ BILBRANSJEN', 960, 690, t, { size: 24, weight: 500, color: C.blue, t0: 69.7, align: 'center', family: FM, track: 0.3 });
+  K.line(ctx, TAG, 960, 600, t, { size: 56, weight: 300, color: INK, t0: 68.4, align: 'center' });
+  K.line(ctx, 'TETT PÅ BILBRANSJEN', 960, 690, t, { size: 24, weight: 500, color: C.blue, t0: 69.0, align: 'center', family: FM, track: 0.3 });
 }
 function flight(ctx, t) {
   if (t < 67.0) return;
@@ -446,7 +447,7 @@ const HITS = [
   [7.5, 'tidslinje', 'pop', { pitch: 'A4' }], [9.0, 'innkjøp', 'tick'], [10.2, 'salg', 'click'], [11.6, 'service', 'tick'], [13.3, 'multipliseres', 'whoosh', { len: 2.4, from: 400, to: 2000 }],
   [17.1, 'horisont åpner', 'whoosh', { len: 1.6, from: 1800, to: 500 }],
   ...[0, 1, 2, 3, 4, 5].map((i) => [+dT(i).toFixed(2), DEPTS[i][0], 'blip', { pitch: ['D5', 'E5', 'F#5', 'A5', 'B5', 'D6'][i] }]),
-  [29.4, 'akse', 'click'], [32.0, 'søyle', 'tick'], [33.3, 'søyle 2', 'tick'], [35.5, 'bruktbil', 'pop', { pitch: 'F#5' }], [38.9, '1300 prikker', 'swell', { len: 2.3 }],
+  [29.4, 'akse', 'click'], [32.0, 'søyle', 'tick'], [33.3, 'søyle 2', 'tick'], [35.5, 'bruktbil', 'pop', { pitch: 'F#5' }], [38.3, '1300 prikker', 'swell', { len: 2.3 }],
   [42.7, 'spredning', 'whoosh', { len: 2.0, from: 500, to: 1800 }], [46.9, 'punkt 1', 'pop', { pitch: 'A5' }], [47.9, 'punkt 2', 'pop', { pitch: 'B5' }], [48.9, 'punkt 3', 'pop', { pitch: 'D6' }],
   [51.3, 'revisor vurderer', 'tick'], [53.6, 'prikker til linje', 'riser', { len: 1.4 }], [55.0, 'midtlinje', 'click'],
   [56.2, 'punkt', 'tick'], [57.6, 'punkt', 'tick'], [59.0, 'punkt', 'tick'], [61.9, 'utsagn', 'sub', { len: 1.2 }], [67.0, 'prikken løsner', 'whoosh', { len: 3.5, from: 600, to: 2400 }],
