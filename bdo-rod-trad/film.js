@@ -44,9 +44,9 @@ for (let i = 1; i <= 5; i++) { sp(-57 + 19 * i, -27.3, 'x' + i); sp(-47.5 + 19 *
 sp(57, -27.3, 'exitB'); sp(63, -26.8);
 // chapter 4: braid, platform (three plates), industry-knowledge column
 const PX = 380, PY = -15;
-wp(215, -26); wp(238, -21); wp(262, -11); wp(284, 0); wp(300, 7, 'pEnter'); wp(322, 8); wp(345, 7, 'pc0'); wp(363, -4); wp(380, -15, 'pc1'); wp(397, -26); wp(415, -37, 'pc2'); wp(433, -36); wp(452, -36, 'pExit');
+wp(215, -26); wp(238, -21); wp(262, -11); wp(284, -3); wp(300, 4, 'pEnter'); wp(322, 5); wp(345, 4, 'pc0'); wp(363, -5); wp(380, -15, 'pc1'); wp(397, -25); wp(415, -34, 'pc2'); wp(433, -33); wp(452, -33, 'pExit');
 const KX = 496;
-wp(470, -52); wp(486, -62); wp(493, -65, 'kTop'); wp(496, -62); wp(496, -56, 'rule1'); wp(496, -29, 'rule2'); wp(496, -2, 'rule3'); wp(496, 22, 'kEnd'); wp(499, 30); wp(510, 37); wp(528, 38.5, 'c0');
+wp(472, -48); wp(486, -60); wp(493, -65, 'kTop'); wp(496, -62); wp(496, -56, 'rule1'); wp(496, -29, 'rule2'); wp(496, -2, 'rule3'); wp(496, 22, 'kEnd'); wp(499, 30); wp(510, 37); wp(528, 38.5, 'c0');
 // chapter 5: along the timeline chart, looping round three points
 function loop(cx, cy, r, name) { for (let k = 0; k <= 12; k++) { const a = Math.PI / 2 - (k * 2 * Math.PI) / 12; wp(cx + r * Math.cos(a), cy + r * Math.sin(a), k === 0 ? name : undefined); } }
 const CH = { x0: 540, mw: 200 / 12, lanes: [20, 28.5, 37, 45.5, 54], names: ['SALG', 'LAGER', 'VERKSTED', 'GARANTI', 'KREDITNOTA'] };
@@ -61,7 +61,7 @@ wp(632, 47.5); wp(646, 40); wp(660, 34); wp(672, 32); wp(678.5, FLAGS[1].y + 3.2
 loop(FLAGS[1].x, FLAGS[1].y, FLAGS[1].r, 'p2');
 wp(700, 34); wp(708, 46); wp(713, 56); wp(717, 57.2); wp(722, 57.2);
 loop(FLAGS[2].x, FLAGS[2].y, FLAGS[2].r, 'p3');
-wp(740, 57.2); wp(752, 55); wp(770, 46); wp(788, 33, 'cEnd'); wp(804, 25); wp(819, 21); wp(830, 21.8, 'conv0'); wp(833, 26); wp(832.4, 31.5); wp(829.6, 36.6);
+wp(740, 57.2); wp(752, 55); wp(768, 48); wp(779, 40); wp(786, 31, 'cEnd'); wp(796, 24); wp(812, 20.5); wp(824, 20.8); wp(830, 21.8, 'conv0'); wp(833, 26); wp(832.4, 31.5); wp(829.6, 36.6);
 // chapter 6: stitching between the two columns
 const MX = 830, ROWS = [40, 47, 54];
 wp(826, ROWS[0], 'sL0'); wp(830, ROWS[0] + 0.3); wp(834, ROWS[0], 'sR0'); wp(831.5, 43.5); wp(827.5, 45); wp(826, ROWS[1], 'sL1'); wp(830, ROWS[1] + 0.3); wp(834, ROWS[1], 'sR1');
@@ -69,15 +69,14 @@ wp(831.5, 50.5); wp(827.5, 52); wp(826, ROWS[2], 'sL2'); wp(830, ROWS[2] + 0.3);
 // chapter 7: out to the red point beside the logo
 wp(838, 57.5); wp(850, 63, 'exitC'); wp(872, 64.5); wp(898, 57); wp(922, 50.5); const END = [945, 48]; wp(END[0], END[1], 'end');
 
-const TH = [], CL_ = [], WPI = [];            // polyline, cumulative arclength, polyline index of each waypoint
-(function build() {
-  const n = WPS.length, P = (i) => WPS[clamp(i, 0, n - 1)];
+// centripetal Catmull-Rom through waypoints; returns the polyline and the polyline index of every waypoint
+function crPoly(W_, step = 0.3) {
+  const n = W_.length, out = [W_[0].slice()], idx = [0];
   const refl = (a, b) => [2 * a[0] - b[0], 2 * a[1] - b[1]];
-  TH.push(WPS[0].slice()); WPI[0] = 0;
+  const dd = (a, b) => Math.max(1e-4, Math.hypot(b[0] - a[0], b[1] - a[1]) ** 0.5);
   for (let i = 0; i < n - 1; i++) {
-    const p1 = WPS[i], p2 = WPS[i + 1], p0 = i === 0 ? refl(p1, p2) : WPS[i - 1], p3 = i + 2 >= n ? refl(p2, p1) : WPS[i + 2];
-    const len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]), cnt = Math.max(1, Math.ceil(len / 0.3));
-    const dd = (a, b) => Math.max(1e-4, Math.hypot(b[0] - a[0], b[1] - a[1]) ** 0.5);
+    const p1 = W_[i], p2 = W_[i + 1], p0 = i === 0 ? refl(p1, p2) : W_[i - 1], p3 = i + 2 >= n ? refl(p2, p1) : W_[i + 2];
+    const len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]), cnt = Math.max(1, Math.ceil(len / step));
     const t0 = 0, t1 = t0 + dd(p0, p1), t2 = t1 + dd(p1, p2), t3 = t2 + dd(p2, p3);
     for (let q = 1; q <= cnt; q++) {
       const t = t1 + ((t2 - t1) * q) / cnt, o = [0, 0];
@@ -89,13 +88,14 @@ const TH = [], CL_ = [], WPI = [];            // polyline, cumulative arclength,
         const b2 = ((t3 - t) / (t3 - t1)) * a2 + ((t - t1) / (t3 - t1)) * a3;
         o[c] = ((t2 - t) / (t2 - t1)) * b1 + ((t - t1) / (t2 - t1)) * b2;
       }
-      TH.push(o);
+      out.push(o);
     }
-    WPI[i + 1] = TH.length - 1;
+    idx.push(out.length - 1);
   }
-  CL_.push(0);
-  for (let i = 1; i < TH.length; i++) CL_.push(CL_[i - 1] + Math.hypot(TH[i][0] - TH[i - 1][0], TH[i][1] - TH[i - 1][1]));
-})();
+  return { pts: out, idx };
+}
+const CRT = crPoly(WPS, 0.3), TH = CRT.pts, WPI = CRT.idx, CL_ = [0];
+for (let i = 1; i < TH.length; i++) CL_.push(CL_[i - 1] + Math.hypot(TH[i][0] - TH[i - 1][0], TH[i][1] - TH[i - 1][1]));
 const TOTAL = CL_[CL_.length - 1];
 const ML = (name) => CL_[WPI[MK[name]]];                      // arclength of a named waypoint
 function idxAt(L) { let lo = 0, hi = CL_.length - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (CL_[m] <= L) lo = m; else hi = m; } return lo; }
@@ -136,11 +136,11 @@ function zoomBlend(A, B, w) {
   const s = Math.exp(lerp(Math.log(A.s), Math.log(B.s), w)), dn = 1 / B.s - 1 / A.s, k = Math.abs(dn) < 1e-9 ? w : (1 / s - 1 / A.s) / dn;
   return { cx: lerp(A.cx, B.cx, k), cy: lerp(A.cy, B.cy, k), s };
 }
-const OVER = { cx: 490, cy: -6, s: 1.72 };
-const SHEET = { x0: -30, y0: -100, x1: 1010, y1: 100 };
+const OVER = { cx: 485, cy: -4, s: 1.82 };
+const SHEET = { x0: -20, y0: -92, x1: 990, y1: 100 };
 let cam = null, LOGOW = 400;
 const finalCam = () => { const s = 40, dotX = 960 - LOGOW / 2 - 64; return { s, cx: END[0] - (dotX - 960) / s, cy: END[1] - (430 - 540) / s }; };
-const MC = { x: pchip([[27.6, 150], [29.5, 190], [31.2, 215], [33.8, 365], [37.5, 395]]), y: pchip([[27.6, -30], [31.2, -30], [33.8, -18], [37.5, -18]]),
+const MC = { x: pchip([[27.6, 150], [29.5, 190], [31.2, 215], [33.8, 365], [37.5, 395]]), y: pchip([[27.6, -30], [31.2, -30], [33.8, -5.5], [37.5, -5.5]]),
   s: pchip([[29, 10.3], [31.4, 10.3], [33.8, 11.6], [37.5, 11.6]].map(([t, s]) => [t, Math.log(s)])) };
 function camera(t) {
   let c = follow(t);
@@ -281,20 +281,19 @@ function drawCar(ctx, t) {
 const DEPT_X = (i) => -47.5 + 19 * i;
 const LABELS = [['kjøpekontrakt', 'innbytte', 'faktura 118432'], ['VIN', 'lagerdager 64', 'beholdning'], ['arbeidsordre', 'timer 3,5', 'deler'], ['delenummer', 'uttak', 'varetelling'], ['garantikrav', 'refusjon', 'VIN'], ['servicehistorikk', 'booking', 'kunde']];
 const TD = [0, 1, 2, 3, 4, 5].map((i) => markT('d' + i));
-const SO = typeof document !== 'undefined' ? document.createElement('canvas') : null;
-if (SO) { SO.width = W; SO.height = H; }
 const edgeK = pchip([[14.6, -100], [16.4, -58], [18.5, -10], [21, 45], [24, 96], [24.5, 100]]);
 function drawSite(ctx, t) {
   if (t < 14.5 || !visible(OX - 86, -52, OX + 86, 52, 20)) return;
   const edge = edgeK(t), reveal = t < 24.5;
   const call = (c) => world.site(c, { k: 1, cx: cam.cx - OX, cy: cam.cy, s: cam.s });
   if (reveal) {
-    const sc = SO.getContext('2d'); sc.setTransform(1, 0, 0, 1, 0, 0); sc.globalCompositeOperation = 'source-over'; sc.globalAlpha = 1; sc.clearRect(0, 0, W, H);
-    call(sc);
-    const ex = P(OX + edge, 0)[0], fe = Math.max(30, 7 * cam.s), g = sc.createLinearGradient(ex - fe, 0, ex, 0);
-    g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-    sc.globalCompositeOperation = 'destination-in'; sc.fillStyle = g; sc.fillRect(0, 0, W, H); sc.globalCompositeOperation = 'source-over';
-    ctx.drawImage(SO, 0, 0);
+    const ex = P(OX + edge, 0)[0], fe = Math.max(30, 7 * cam.s);
+    if (ex > -10) {
+      ctx.save(); ctx.beginPath(); ctx.rect(0, 0, Math.min(W, ex), H); ctx.clip();
+      call(ctx);
+      if (ex < W + fe) { const g = ctx.createLinearGradient(ex - fe, 0, ex, 0); g.addColorStop(0, rgba(C.arctic, 0)); g.addColorStop(1, rgba(C.arctic, 1)); ctx.fillStyle = g; ctx.fillRect(ex - fe, 0, fe + 2, H); }
+      ctx.restore();
+    }
     if (edge < 99) { ctx.strokeStyle = rgba(LB, 0.8); ctx.lineWidth = 1; ctx.beginPath(); const [a, b] = [P(OX + edge, -52), P(OX + edge, 52)]; ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
   } else call(ctx);
   // departments light up as the thread passes
@@ -331,33 +330,27 @@ const TRACK_Y = (j) => -52.5 - (5 - j) * 1.7;
 const STRANDS = (() => {
   const out = [], Lex = ML('exitB'), Lpe = ML('pEnter');
   for (let j = 0; j < 6; j++) {
-    const cx = DEPT_X(j), xJ = 236 + 4 * j;
+    const cx = DEPT_X(j), xJ = 236 + 4 * j, xs = cx + OX + 12.5;
     // join arclength on the red path at world x = xJ
     let Lj = Lex; for (let i = idxAt(Lex); i < TH.length; i++) if (TH[i][0] >= xJ) { Lj = CL_[i]; break; }
-    const jp = posAt(Lj), ty = TRACK_Y(j), A = [[cx + OX, -36.8], [cx + OX, -42], [cx + OX, -47.5], [cx + OX + 2.6, ty + 0.3], [cx + OX + 5.5, ty], [OX + 70, ty], [xJ - 16, ty], [xJ - 7, (ty + jp[1]) / 2 - 1], [jp[0], jp[1]]];
-    // sample A with a light Catmull-Rom
-    const pts = [];
-    for (let i = 0; i < A.length - 1; i++) {
-      const p0 = A[Math.max(0, i - 1)], p1 = A[i], p2 = A[i + 1], p3 = A[Math.min(A.length - 1, i + 2)], len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]), cnt = Math.max(1, Math.ceil(len / 0.4));
-      for (let q = 0; q < cnt; q++) {
-        const f = q / cnt, f2 = f * f, f3 = f2 * f;
-        pts.push([0, 1].map((c) => 0.5 * (2 * p1[c] + (-p0[c] + p2[c]) * f + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * f2 + (-p0[c] + 3 * p1[c] - 3 * p2[c] + p3[c]) * f3)));
-      }
-    }
+    let st0 = TH[idxAt(ML('d' + j))]; for (let i = idxAt(ML('d' + j)); i < TH.length; i++) if (TH[i][0] >= xs) { st0 = TH[i]; break; }
+    const jp = posAt(Lj), ty = TRACK_Y(j), A = [[st0[0], st0[1]], [xs, -34], [xs, -44], [xs, -48.5], [xs + 2.6, ty + 0.3], [xs + 6, ty], [OX + 76 + (j > 3 ? 4 : 0), ty], [xJ - 16, ty], [xJ - 7, (ty + jp[1]) / 2 - 1], [jp[0], jp[1]]];
+    const pts = crPoly(A, 0.4).pts;
+    const lenA = pts.length;
     // braid along the red path, then fan into the first plate
     const lam = 13, amp = 0.95;
     for (let L = Lj; L < Lpe; L += 0.5) { const env = ss(0, 9, L - Lj), ph = (j / 6) * Math.PI * 2; pts.push(posAt(L, amp * env * Math.sin(((L - Lj) / lam) * Math.PI * 2 + ph))); }
-    const rowN = [0, 1, 2, 3, 4, 2][j], node = [PX - 48 + 1.5 * rowN + (j === 5 ? 6 : 0), PY + 29 - 3.5 * rowN];
+    const rowN = [0, 1, 2, 3, 4, 2][j], node = [PX - 48 + 1.5 * rowN + (j === 5 ? 6 : 0), PY + 25 - 3 * rowN];
     const last = pts[pts.length - 1], mid = [lerp(last[0], node[0], 0.5), lerp(last[1], node[1], 0.5)];
     for (let q = 1; q <= 14; q++) { const f = q / 14; pts.push([lerp(lerp(last[0], mid[0], f), lerp(mid[0], node[0], f), f), lerp(lerp(last[1], mid[1], f), lerp(mid[1], node[1], f), f)]); }
-    out.push({ pts, node });
+    out.push({ pts, node, fa: lenA / pts.length, tj: tipT(Lj) });
   }
   return out;
 })();
 const PLATES = ['KJØRETØYDATA', 'TRANSAKSJONER', 'ØKONOMISKE DATA'];
 const PLATE_T0 = [32.0, 32.5, 33.0];
 function plateGeom(j) {
-  const cy = PY + 22 - 22 * j, hh = 7, lean = 6;
+  const cy = PY + 19 - 19 * j, hh = 6, lean = 6;
   return { cy, tl: [PX - 48 + lean, cy - hh], tr: [PX + 48 + lean, cy - hh], br: [PX + 48, cy + hh], bl: [PX - 48, cy + hh] };
 }
 function drawPlatform(ctx, t) {
@@ -401,15 +394,15 @@ function drawPlatform(ctx, t) {
     }
     ctx.stroke(); ctx.restore();
   }
-  if (ka > 0) { ctx.save(); ctx.globalAlpha *= ka; K.kicker(ctx, 'BDO dataplattform', P(PX - 42, PY - 48.5)[0], P(PX - 42, PY - 48.5)[1], t, { color: BL, t0: markT('pEnter') - 0.5, out: markT('kTop') + 0.8, size: 26 * kp }); ctx.restore(); }
+  if (ka > 0) { ctx.save(); ctx.globalAlpha *= ka; K.kicker(ctx, 'BDO dataplattform', P(PX - 42, PY - 45.5)[0], P(PX - 42, PY - 45.5)[1], t, { color: BL, t0: markT('pEnter') - 0.5, out: markT('kTop') + 0.8, size: 26 * kp }); ctx.restore(); }
 }
 function drawStrands(ctx, t) {
-  if (t < 29) return;
+  if (t < 22) return;
   ctx.save(); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   const lw = clamp(cam.s / 8, 1, 1.8);
   ctx.lineWidth = lw; ctx.strokeStyle = rgba(BL, 0.95);
   STRANDS.forEach((st, j) => {
-    const p = E.inOutCubic(prog(t, 29.1 + 0.25 * j, 31.9 + 0.25 * j)); if (p <= 0) return;
+    const p = st.fa * E.inOutSine(prog(t, TD[j] + 1.2, st.tj)) + (1 - st.fa) * E.inOutCubic(prog(t, st.tj - 0.1, st.tj + 2.6)); if (p <= 0) return;
     const pts = st.pts.map(([x, y]) => P(x, y)); K.drawOn(ctx, pts, p);
     if (p >= 1) { const [x, y] = P(...st.node); ctx.fillStyle = BL; ctx.beginPath(); ctx.arc(x, y, 3, 0, 7); ctx.fill(); }
   });
@@ -433,9 +426,9 @@ function drawKnow(ctx, t) {
     const t0 = markT('rule' + (i + 1)) - 0.15;
     const rp = E.outCubic(prog(t, t0, t0 + 0.9));
     if (rp > 0) { ctx.strokeStyle = rgba(LB, 0.9); ctx.lineWidth = 1; ctx.beginPath(); const a = P(KX, RY[i]), b = P(KX + 56 * rp, RY[i]); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
-    ctx.save(); ctx.globalAlpha *= ka;
     const [nx, ny] = P(KX + 3, RY[i] + 12.2);
     K.line(ctx, k.n, nx, ny, t, { size: clamp(9.5 * S, 60 * kk, 150), weight: 300, color: BL, t0: t0 + 0.1, dur: 0.9 });
+    ctx.save(); ctx.globalAlpha *= ka;
     const [lx, ly] = P(KX + 3, RY[i] + 17.4);
     K.line(ctx, k.l, lx, ly, t, { size: 30 * kk, weight: 500, color: G, t0: t0 + 0.35 });
     const [sx, sy] = P(KX + 3, RY[i] + 21.4);
@@ -506,14 +499,15 @@ function drawChart(ctx, t) {
     if (q > 0) { ctx.fillStyle = RED; ctx.beginPath(); ctx.arc(px, py, 6.5 * q, 0, 7); ctx.fill(); }
     const tt = tp + 1.1, tq = E.outCubic(prog(t, tt, tt + 0.5));
     if (tq > 0 && ka > 0.05) {
-      const lx = px + 22, ly = py + 9;
+      const lx = px - 12, by = P(0, 15.0)[1];
       ctx.save(); ctx.font = M.font(24, 500, DISPLAY); const w = ctx.measureText(f.text).width; ctx.restore();
+      ctx.strokeStyle = rgba(RED, 0.85); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(px, py - 48 * kc); ctx.lineTo(px, lerp(py - 48 * kc, by, tq)); ctx.stroke();
       const bw = (w + 30) * tq, bh = 42;
-      ctx.fillStyle = rgba(C.white, 0.97); ctx.fillRect(lx - 12, ly - 29, bw, bh);
-      ctx.strokeStyle = rgba(G, 0.18); ctx.lineWidth = 1; ctx.strokeRect(lx - 12, ly - 29, bw, bh);
-      ctx.fillStyle = RED; ctx.fillRect(lx - 12, ly - 29, 4, bh);
-      ctx.save(); ctx.beginPath(); ctx.rect(lx - 8, ly - 29, bw - 4, bh); ctx.clip();
-      ctx.font = M.font(24, 500, DISPLAY); ctx.fillStyle = G; ctx.fillText(f.text, lx + 2, ly); ctx.restore();
+      ctx.fillStyle = rgba(C.white, 0.97); ctx.fillRect(lx, by - bh, bw, bh);
+      ctx.strokeStyle = rgba(G, 0.18); ctx.lineWidth = 1; ctx.strokeRect(lx, by - bh, bw, bh);
+      ctx.fillStyle = RED; ctx.fillRect(lx, by - bh, 4, bh);
+      ctx.save(); ctx.beginPath(); ctx.rect(lx + 4, by - bh, bw - 4, bh); ctx.clip();
+      ctx.font = M.font(24, 500, DISPLAY); ctx.fillStyle = G; ctx.fillText(f.text, lx + 16, by - 14); ctx.restore();
     }
   }
   ctx.restore();
@@ -521,17 +515,17 @@ function drawChart(ctx, t) {
 const spr = (s) => M.spring(s, M.SPRING.bouncy);
 
 // ------------------------------------------------------------------ chapter 6: the conversation
-const VAL_R = ['Mer tid til faglige vurderinger', 'Risiko vurdert på riktig sted', 'Bedre grunnlag for konklusjoner'];
-const VAL_K = ['Relevant innsikt i egen drift', 'Bedre forståelse av lønnsomhet', 'Dialog om det som betyr noe'];
+const VAL_R = ['Bedre oversikt over datagrunnlaget', 'Bedre grunnlag for risikovurdering', 'Mer tid til faglig vurdering'];
+const VAL_K = ['Bedre oversikt over egen virksomhet', 'Mer relevant oppfølging', 'Tydeligere dialog om funn'];
 function drawConv(ctx, t) {
   if (t < 54 || !visible(MX - 60, 26, MX + 60, 62, 20)) return;
-  const S = cam.s, tc = markT('conv0') - 1.0, tag_ = (t_) => t_ - 0.0, kv = kz(16), ka = ss(0.4, 0.75, kv);
+  const S = cam.s, tc = markT('cEnd') - 0.6, tag_ = (t_) => t_ - 0.0, kv = kz(16), ka = ss(0.4, 0.75, kv);
   ctx.save(); ctx.globalAlpha *= ka;
   const [lx0, hy] = P(822.5, 33), [rx0] = P(837.5, 33);
   K.line(ctx, 'VERDI FOR REVISOR', lx0, hy, t, { size: 24, weight: 500, color: BL, t0: tc, family: MONO, align: 'right', track: 0.12 });
   K.line(ctx, 'VERDI FOR KUNDEN', rx0, hy, t, { size: 24, weight: 500, color: BL, t0: tc + 0.15, family: MONO, track: 0.12 });
   const rp = E.outCubic(prog(t, tc + 0.1, tc + 1.2)); ctx.strokeStyle = rgba(LB, 0.9); ctx.lineWidth = 1;
-  if (rp > 0) { ctx.beginPath(); let a = P(822.5, 34.4), b = P(822.5 - 42 * rp, 34.4); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); a = P(837.5, 34.4); b = P(837.5 + 42 * rp, 34.4); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+  if (rp > 0) { ctx.beginPath(); let a = P(822.5, 34.4), b = P(822.5 - 30 * rp, 34.4); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); a = P(837.5, 34.4); b = P(837.5 + 42 * rp, 34.4); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
   for (let i = 0; i < 3; i++) {
     const tl = markT('sL' + i) - 0.1, tr = markT('sR' + i) - 0.1, [ax, ay] = P(822.5, ROWS[i] + 0.7), [bx, by] = P(837.5, ROWS[i] + 0.7);
     K.line(ctx, VAL_R[i], ax, ay, t, { size: 34, weight: 500, color: G, t0: tl, align: 'right' });
@@ -546,13 +540,13 @@ function drawConv(ctx, t) {
 }
 
 // ------------------------------------------------------------------ overview labels (the payoff view)
-const OVL = [[-6, 'Transaksjon · bil'], [60, 'Virksomheten'], [330, 'Dataplattform'], [496, 'Bransjekunnskap'], [600, 'Analyse'], [800, 'Verdi'], [930, 'BDO']];
+const OVL = [[-6, 'Transaksjon · bil'], [60, 'Virksomheten'], [330, 'Dataplattform'], [496, 'Bransjekunnskap'], [600, 'Analyse'], [800, 'Verdi']];
 function drawOverview(ctx, t) {
   const a = ss(2.6, 1.9, cam.s) * ss(66.4, 68.2, t) * (1 - ss(70.4, 71.6, t));
   if (a <= 0.01) return;
   OVL.forEach(([x, str], i) => {
-    const [sx, sy0] = P(x, 80), sy = sy0 + (i % 2) * 34; ctx.save(); ctx.globalAlpha *= a;
-    ctx.fillStyle = rgba(G, 0.4); ctx.fillRect(sx, sy0 - 30, 1, 30 + (i % 2) * 34 + 6);
+    const [sx, sy0] = P(x, 70), sy = sy0 + (i % 2) * 30; ctx.save(); ctx.globalAlpha *= a;
+    ctx.fillStyle = rgba(G, 0.4); ctx.fillRect(sx, sy0 - 24, 1, 24 + (i % 2) * 30 + 6);
     mono(ctx, String(i + 1).padStart(2, '0') + '  ' + str.toUpperCase(), sx + 8, sy, 18, G, { track: 0.1 });
     ctx.restore();
   });
@@ -564,7 +558,7 @@ function drawOverview(ctx, t) {
 function drawThread(ctx, t) {
   const L = Lof(t), i = idxAt(L), f = (L - CL_[i]) / Math.max(1e-9, CL_[i + 1] - CL_[i]), a = TH[i], b = TH[Math.min(i + 1, TH.length - 1)];
   const tip = [lerp(a[0], b[0], f), lerp(a[1], b[1], f)];
-  const w = 3.2 + 1.6 * clamp(1 - cam.s / 8);
+  const w = 3.2 + 1.0 * clamp(1 - cam.s / 8);
   const sx = W / 2 - cam.cx * cam.s, sy = H / 2 - cam.cy * cam.s, s = cam.s;
   ctx.save(); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   const trace = () => { ctx.beginPath(); ctx.moveTo(sx + TH[0][0] * s, sy + TH[0][1] * s); for (let k = 1; k <= i; k++) ctx.lineTo(sx + TH[k][0] * s, sy + TH[k][1] * s); ctx.lineTo(sx + tip[0] * s, sy + tip[1] * s); };
@@ -587,7 +581,6 @@ const CAPS = [
   { s: ['Revisor vurderer hva det betyr.'], a: 53.3, b: 58.8 },
   { s: ['Effektiv revisjon. Relevant innsikt.'], a: 61.2, b: 66.2 },
   { s: ['Hele bildet.'], a: 66.9, b: 69.6 },
-  { s: ['Vi ser detaljene.', 'Vi forstår helheten.'], a: 71.0, b: 1e9 },
 ];
 function drawCaptions(ctx, t) {
   let sc = 0; for (const c of CAPS) sc = Math.max(sc, win(t, c.a, c.b, 0.5, 0.45));
@@ -625,9 +618,10 @@ function drawAll(ctx, t) {
   // the logo, set into the sheet beside the end of the thread
   const lw = clamp(prog(t, 71.3, 72.5)); if (lw > 0) { const fc = finalCam(), lx = END[0] + (64 + LOGOW / 2) / fc.s, [sx, sy] = P(lx, END[1]); K.drawLogo(ctx, sx, sy, (150 / fc.s) * cam.s, { wipe: E.outQuint(lw) }); }
   drawCaptions(ctx, t);
-  if (t > 71.6) {
+  if (t > 71.5) {
     const q = E.outQuint(prog(t, 71.9, 72.9)); void q;
-    K.line(ctx, 'TETT PÅ BILBRANSJEN', W / 2, 590, t, { size: 30, weight: 500, color: BL, t0: 72.0, family: MONO, track: 0.2, align: 'center' });
+    K.line(ctx, 'Vi ser detaljene. Vi forstår helheten.', W / 2, 640, t, { size: 48, weight: 300, color: G, t0: 71.6, align: 'center' });
+    K.line(ctx, 'TETT PÅ BILBRANSJEN', W / 2, 720, t, { size: 30, weight: 500, color: BL, t0: 72.0, family: MONO, track: 0.2, align: 'center' });
   }
 }
 
