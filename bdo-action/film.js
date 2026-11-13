@@ -86,6 +86,25 @@ function ledgerPage(ctx, { off, col, alpha, size = 40, pitch = 78, hl = -1, hlCo
   }
 }
 
+
+// batched data field (same look as K.field, one path per alpha bucket: ~10x cheaper)
+const BUCKET = K.PTS.map((p) => Math.min(3, Math.floor(p.z * 4)));
+function FF(ctx, k, { alpha = 1, pos = null, links = 1, red = 1 } = {}) {
+  const col = k < 0.5 ? C.cloud : C.blue, PT = K.PTS, Q = pos ? PT.map(pos) : null;
+  const at = (i) => (Q ? Q[i] : [PT[i].x, PT[i].y, 1, 1]);
+  if (links > 0) {
+    ctx.lineWidth = 1; ctx.strokeStyle = rgba(k < 0.5 ? C.light : C.blue, 0.22 * alpha * links); ctx.beginPath();
+    for (const [a, b] of K.LINKS) { const A = at(a), B = at(b); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); }
+    ctx.stroke();
+  }
+  for (let b = 0; b < 4; b++) {
+    ctx.fillStyle = rgba(col, alpha * (0.35 + 0.65 * (b + 0.5) / 4)); ctx.beginPath();
+    for (let i = 1; i < K.NPTS; i++) { if (BUCKET[i] !== b) continue; const q = at(i), r = PT[i].r * (q[3] ?? 1); ctx.moveTo(q[0] + r, q[1]); ctx.arc(q[0], q[1], r, 0, 7); }
+    ctx.fill();
+  }
+  const q = at(0); K.redDot(ctx, q[0], q[1], 7 * (q[3] ?? 1), red * (q[2] ?? 1));
+}
+
 // -- field helpers
 const CL = K.CLUSTERS;
 function netLines(ctx, p, col, wd) {
@@ -173,29 +192,29 @@ const IM = {
     };
   },
   fieldAll(ctx, c) {
-    const s = 1 + c.p * 0.06; ctx.save(); aboutXf(ctx, s, W / 2, H / 2); K.field(ctx, c.L.k, { alpha: c.L.id === 'B' ? 0.7 : 0.85 }); ctx.restore();
+    const s = 1 + c.p * 0.06; ctx.save(); aboutXf(ctx, s, W / 2, H / 2); FF(ctx, c.L.k, { alpha: c.L.id === 'B' ? 0.7 : 0.85 }); ctx.restore();
   },
   fieldPulse(ctx, c) {
     const s = 1 + 0.08 * Math.abs(Math.sin(c.lt * Math.PI)) + c.p * 0.04; ctx.save(); aboutXf(ctx, s, W / 2, H / 2);
-    K.field(ctx, 0, { alpha: 0.75 }); ctx.restore();
+    FF(ctx, 0, { alpha: 0.75 }); ctx.restore();
   },
   net(ctx, c) {
-    ctx.save(); K.field(ctx, 0, { alpha: 0.4, links: 0.8 }); netLines(ctx, clamp(c.ls / 0.9), C.white, 3); ctx.restore();
+    ctx.save(); FF(ctx, 0, { alpha: 0.4, links: 0.8 }); netLines(ctx, clamp(c.ls / 0.9), C.white, 3); ctx.restore();
   },
   explode(ctx, c) {
     const q = E.outExpo(prog(c.ls, 0, 0.45)), f = q * 1.0 + c.p * 0.45;
     const pos = (p) => { const dx = p.x - W / 2, dy = p.y - H / 2; const j = 1 + p.seed * 0.5 * (1 - q); return [W / 2 + dx * f * j, H / 2 + dy * f * j, 1, 1 + (1 - q) * 0.5]; };
-    K.field(ctx, c.L.k, { pos, alpha: 0.9, links: q });
+    FF(ctx, c.L.k, { pos, alpha: 0.9, links: q });
   },
   fly(ctx, c) {
     const f = lerp(1.7, 3.3, E.outCubic(c.p)); const pos = (p) => { const dx = p.x - 700, dy = p.y - 520; return [W / 2 + dx * f, H / 2 + dy * f, 1, 2.2]; };
-    K.field(ctx, c.L.k, { pos, alpha: 0.85, links: 0.5 });
+    FF(ctx, c.L.k, { pos, alpha: 0.85, links: 0.5 });
   },
   zoomCluster(ctx, c) {
-    ctx.save(); aboutXf(ctx, 3.1 + c.p * 0.5, CL[0].x, CL[0].y); K.field(ctx, c.L.k, { alpha: 0.85, red: 0 }); ctx.restore();
+    ctx.save(); aboutXf(ctx, 3.1 + c.p * 0.5, CL[0].x, CL[0].y); FF(ctx, c.L.k, { alpha: 0.85, red: 0 }); ctx.restore();
   },
   labels(ctx, c) {
-    K.field(ctx, 0, { alpha: 0.6, links: 0.6 });
+    FF(ctx, 0, { alpha: 0.6, links: 0.6 });
     ctx.font = M.font(30, 500, MONO); ctx.letterSpacing = '4px'; ctx.textAlign = 'left';
     CL.forEach((cl, i) => { const q = E.outCubic(prog(c.ls, i * 0.05, i * 0.05 + 0.2)); if (q <= 0) return; ctx.fillStyle = rgba(C.white, q); disc(ctx, cl.x, cl.y, 8, C.white); ctx.fillText(cl.name.toUpperCase(), cl.x + 20, cl.y - 20); });
     ctx.letterSpacing = '0px';
@@ -212,7 +231,7 @@ const IM = {
   converge(ctx, c) {
     const f = 1 - E.inOutCubic(prog(c.p, 0, 0.85)), tx = W / 2, ty = 300;
     const pos = (p) => [lerp(tx, p.x, f), lerp(ty, p.y, f), 1, 1 + (1 - f) * 0.4];
-    K.field(ctx, 0, { pos, alpha: 0.8, links: f });
+    FF(ctx, 0, { pos, alpha: 0.8, links: f });
     const r = 22 * (1 - f) + 6 * f;
     if (f < 0.05) { disc(ctx, tx, ty, 24 + (c.lt - 0.7) * 0, C.red); }
   },
@@ -246,7 +265,7 @@ const IM = {
   },
   links(ctx, c) {
     const L = c.L, base = c.mode === 1 ? 1.5 : 1;
-    ctx.save(); aboutXf(ctx, base + c.p * 0.15, W / 2, H / 2); K.field(ctx, L.k, { alpha: 0.35, links: 1.2, red: 0.8 });
+    ctx.save(); aboutXf(ctx, base + c.p * 0.15, W / 2, H / 2); FF(ctx, L.k, { alpha: 0.35, links: 1.2, red: 0.8 });
     const r = K.mulberry32(c.mode === 1 ? 31 : 17);
     ctx.lineCap = 'round'; ctx.strokeStyle = L.line; lw(ctx, 3);
     for (let i = 0; i < 16; i++) {
@@ -269,7 +288,7 @@ const IM = {
   herField(ctx, c) {          // the field with the red point shifted to the right; ring snaps around it
     const hold = c.mode === 1, s = 1 + c.p * 0.04;
     ctx.save(); ctx.translate(1350, 640); ctx.scale(s, s); ctx.translate(-560, -690);
-    K.field(ctx, c.L.k, { alpha: hold ? 0.55 : 0.7, links: 0.8, red: 0 }); ctx.restore();
+    FF(ctx, c.L.k, { alpha: hold ? 0.55 : 0.7, links: 0.8, red: 0 }); ctx.restore();
     const t0 = hold ? -1 : 0.28, q = hold ? 1 : E.outExpo(prog(c.ls, t0, t0 + 0.12)), r = hold ? 38 : lerp(420, 38, q) - (hold ? 0 : 5 * Math.sin(prog(c.ls, t0 + 0.1, t0 + 0.3) * Math.PI));
     const x = 1350, y = 640;
     disc(ctx, x, y, 9, C.red);
@@ -292,7 +311,7 @@ const IM = {
     disc(ctx, W / 2 + 330 * 0.707, H / 2 - 330 * 0.707, 14 * q, C.red);
   },
   picks(ctx, c) {
-    K.field(ctx, 0, { alpha: 0.3, links: 0.5, red: 0 });
+    FF(ctx, 0, { alpha: 0.3, links: 0.5, red: 0 });
     const r = K.mulberry32(53); ctx.lineCap = 'round';
     for (let i = 0; i < 18; i++) {
       const p = K.PTS[1 + Math.floor(r() * 2399)], q = E.outBack(prog(c.ls, i * 0.025, i * 0.025 + 0.15), 2);
@@ -323,7 +342,7 @@ let cur = 0;
 function S(word, n, look, anim, im, x = {}) { SH.push({ word, n, b: cur, L: LK[look], anim, im, ...x }); cur += n; }
 const num = (f) => ({ num: f });
 
-S('ÉN.', 2, 'N', 'slam', IM.dot, { align: 'l', sfx: 'impact', shake: 14 });
+S('ÉN.', 2, 'N', 'slam', IM.dot, { align: 'l', dx: 40, sfx: 'impact', shake: 14 });
 S('TRANSAKSJON.', 3, 'A', 'L', IM.ledger, { dy: -90, sfx: 'thud', hits: [[0.5, 'amount', 'tick']] });
 S('ÉN.', 2, 'N', 'slam', IM.wheel, { sfx: 'thud', shake: 12 });
 S('BIL.', 3, 'A', 'U', IM.car, { dy: -190, sfx: 'thud', shake: 8, hits: [[1.8, 'car drawn', 'pop', { pitch: 'A4' }]] });
@@ -369,7 +388,7 @@ S('DEG.', 4, 'A', 'slam', IM.siteBack, { sfx: 'thud', shake: 12, hits: [[2.5, 'w
 if (cur !== END) throw new Error('shot list ends at beat ' + cur + ', expected ' + END);
 
 const HEAVY = new Map([[IM.whip, 2], [IM.planClose, 3], [IM.plan, 2], [IM.siteFor, 3], [IM.siteBack, 3], [IM.fieldAll, 4], [IM.fieldPulse, 4], [IM.net, 4], [IM.explode, 4], [IM.fly, 4], [IM.zoomCluster, 4], [IM.labels, 4], [IM.converge, 4], [IM.picks, 4], [IM.numDots, 4]]);
-SH.forEach((s) => { s.samples = s.samples ?? HEAVY.get(s.im) ?? (/^(DATA|SAMMEN|VURDERER|HER)/.test(s.word) ? 4 : 6); if (s.im.name === '' || s.word.startsWith('SALG') ) {} });
+SH.forEach((s) => { s.samples = s.samples ?? HEAVY.get(s.im) ?? (/^(DATA|SAMMEN|VURDERER|HER)/.test(s.word) ? 3 : 4); if (s.im.name === '' || s.word.startsWith('SALG') ) {} });
 const STARTS = SH.map((s) => s.b);
 const shotAt = (u) => { let i = 0; for (let k = 0; k < SH.length; k++) if (STARTS[k] <= u) i = k; else break; return SH[i]; };
 
@@ -468,7 +487,7 @@ HITS.sort((a, b) => a[0] - b[0]);
 M.film({
   fonts: [M.font(100, 800, DISPLAY), M.font(100, 300, DISPLAY), M.font(40, 500, MONO)],
   hits: HITS,
-  samples: (t) => (t / P >= END ? 1 : (shotAt(t / P).samples ?? 6)),
+  samples: (t) => (t / P >= END ? 1 : (shotAt(t / P).samples ?? 4)),
   async init() { await K.loadLogo(); },
   draw(ctx, u, t) {
     if (u >= END) { endCard(ctx, u, t); return; }
