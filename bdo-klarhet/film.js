@@ -535,7 +535,7 @@ const HITS = [
 M.film({
   fonts: [M.font(100, 600, K.DISPLAY), M.font(100, 300, K.DISPLAY), M.font(40, 500, K.MONO)],
   hits: HITS,
-  samples: (t) => (Math.abs(t - 5) < 2.6 || Math.abs(t - 13.5) < 2.6 || (t > 22.5 && t < 26.5) || (t > 32.5 && t < 35.5) || (t > 36.3 && t < 38) || (t > 38.4 && t < 40) || (t > 40.2 && t < 43) || (t > 48.4 && t < 51.5) ? 6 : 4),
+  samples: (t) => (Math.abs(t - 5) < 2.6 || Math.abs(t - 13.5) < 2.6 || (t > 22.5 && t < 26.5) || (t > 32.5 && t < 35.5) || (t > 36.3 && t < 38) || (t > 38.4 && t < 40) || (t > 40.2 && t < 43) || (t > 48.4 && t < 51.5) ? 5 : 3),
   init,
   draw(ctx, u, t) {
     if (!READY) { K.sheet(ctx, 0); return; }
