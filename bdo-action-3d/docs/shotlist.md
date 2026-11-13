@@ -1,0 +1,22 @@
+# BDO Automotive – Action 3D: shot list
+60 s · 128 bpm · 128 beats (beat 0.46875 s, bar = 4 beats = 1.875 s, 32 bars) · 16:9 · no VO
+All 3-D is drawn with `lib/k3d.js` (perspective on the 2-D canvas): one continuous virtual camera that
+flies, orbits, whips and crashes through type and data. One huge word (or number) at a time.
+
+Looks (alternate, hard cuts on the beat): N = night #17191C with white type · A = light #F7F7F7 with blue type ·
+B = full BDO Blue with white type · R = full BDO Red with white type (max 3 times: bars 12, 20, 28).
+Red otherwise only as the signature point/line and the full stop after each word.
+
+| bars | beats | section | words (one at a time) | 3-D image |
+|---|---|---|---|---|
+| 1–4 | 0–16 | COLD OPEN | ÉN. · TRANSAKSJON. · ÉN. · BIL. · TUSEN. · BILER. | red point alone in black space → camera pulls back through a TUNNEL of ledger lines (text3 rows flying past) → the line-drawn car (elevation polylines placed in 3-D, camera orbits 30°) → car multiplies into a field of hundreds of car outlines on a perspective floor, camera rises |
+| 5–8 | 16–32 | THE BUSINESS | SALG. LAGER. VERKSTED. DELER. GARANTI. SERVICE. (1 beat each + 2 beats hold) · then ALT. HENGER. SAMMEN. | six department slabs as 3-D boxes on the floor (a city-block model of the dealership); each word stands as text3 ON its block as the camera whips to it; then lines shoot between all blocks, camera cranes up |
+| 9–12 | 32–48 | TECHNOLOGY: DATA | MILLIONER. · AV. · DATAPUNKTER. · HENTET. · SAMMENSTILT. · ANALYSERT. · ÉN. PLATTFORM. (bar 12 = RED hit) | thousands of 3-D points burst from the blocks, camera flies THROUGH the cloud (points streak past), they stream into three stacked grid planes (true perspective, camera orbit), vertical links snap between layers; kicker 'BDO DATAPLATTFORM' |
+| 13–20 | 48–80 | BRANSJEKUNNSKAP (the heart; slower, 8 bars) | VI. KJENNER. BRANSJEN. · then the analysis: 'BDO BILBRANSJEANALYSEN 2025' title set large · 1 300+ ('BILBRANSJEBEDRIFTER ANALYSERT') · 1,5 % → 1,7 % ('DRIFTSMARGIN MERKEFORHANDLERE 2023 → 2024', kicker 'ETTERLENGTET ØKNING') · 2,5 % ('DRIFTSMARGIN BRUKTBILFORHANDLERE 2024') · SMÅ. MELLOMSTORE. STORE. ('FORHANDLERE SAMMENLIGNET ETTER STØRRELSE') · 10 ÅR. ('OMSETNING OG DRIFTSMARGIN I ET 10-ÅRS PERSPEKTIV') · then TALL. BLIR. FORSTÅELSE. (bar 20 = RED hit on FORSTÅELSE.) | a 3-D field of 1 300 small cubes rising from the floor in a wave (one per company) with the camera sweeping low over them; 3-D BAR CHART: two extruded bars 1,5 and 1,7 growing (camera orbits, numerals as text3 standing on the bars), a third taller teal-less SLATE bar 2,5 beside them; three groups of cubes of different heights for small/medium/large; a long ribbon/timeline receding into depth for 10 years (10 ticks, no invented values) |
+| 21–24 | 80–96 | EFFICIENT AUDIT | MØNSTRE. · SAMMENHENGER. · SE. HER. (ring snaps around ONE red point, MONO tag 'Garantikrav uten arbeidsordre') · TEKNOLOGIEN. VISER. VEI. · REVISOR. VURDERER. (hold 4 beats: the breath) · MÅLRETTET. EFFEKTIV. REVISJON. | point cloud settles into ordered 3-D bands (a landscape of data ridges), camera glides along them; a few points stand above the surface, one turns red, camera dives to it; crosshair/ring in 3-D |
+| 25–28 | 96–112 | INSIGHT FOR THE CUSTOMER | DINE. DATA. · DIN. INNSIKT. · OVERSIKT. · DIALOG. · UTVIKLING. · MER. VERDI. (bar 28 = RED hit on VERDI.) · FOR. DEG. | the same data landscape hands over to the customer: the dealership block model returns in light (look A), now with the data layer floating above it as a translucent-free line grid, the red line running from the platform down into the building; small MONO labels: 'BEDRE OVERSIKT OVER EGEN VIRKSOMHET', 'TYDELIGERE DIALOG OM FUNN', 'INNSIKT I UTVIKLING OG SAMMENHENGER' |
+| 29–32 | 112–128 | END (7.5 s, calm) | BRANSJEKUNNSKAP. + TEKNOLOGI. + INNSIKT. (three lines stack, 1 bar) → hard cut to white end card | White card: left 'Vi ser detaljene.' / 'Vi forstår helheten.' (DISPLAY 300, charcoal, large), MONO 'BDO AUTOMOTIVE'. The CORNERSTONE slides in bottom-right (`K.cornerstone(ctx, p)` – red, 35°, opaque, on top, white logo). Nothing may overlap it. Hold ≥ 3 s still. |
+
+Rules: first frame is already a hit · frame ON each cut shows the new image · no fades · every word readable in its beat
+(type ≥ 240 px when it is the shot's point) · every figure is one of the real ones above · camera never still except the end card.
+Longest gap without a new event: 4 beats (1.9 s).
