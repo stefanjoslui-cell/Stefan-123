@@ -179,10 +179,10 @@ const IM = {
   whip(ctx, c) {
     const e = E.inOutCubic(prog(c.p, 0, 1)), cx = lerp(-50, 55, e), v = Math.abs(55 + 50) * 6 * Math.sin(Math.PI * c.p) * 0.012;
     ctx.save();
-    for (const g of [-1, 0, 1]) { if (g && v < 0.25) continue; ctx.globalAlpha = g ? 0.45 : 1; world.site(ctx, { k: 0, cx: cx + g * v * 4, cy: 18, s: 42 }); }
+    for (const g of [-1, 0, 1]) { if (g && v < 0.25) continue; ctx.globalAlpha = g ? 0.45 : 1; (g ? world.siteFast : world.site)(ctx, { k: 0, cx: cx + g * v * 4, cy: 18, s: 42 }); }
     ctx.restore();
   },
-  plan(ctx, c) { world.site(ctx, { k: c.L.k, cx: 0, cy: 13, s: 12.5 + c.p * 1.6, alpha: c.L.id === 'B' ? 0.7 : 0.9 }); },
+  plan(ctx, c) { world.siteFast(ctx, { k: c.L.k, cx: 0, cy: 13, s: 12.5 + c.p * 1.6, alpha: c.L.id === 'B' ? 0.7 : 0.9 }); },
   planClose(ctx, c) { world.site(ctx, { k: c.L.k, cx: -6 + c.p * 12, cy: 12 + c.p * 3, s: 64, alpha: c.L.id === 'B' ? 0.8 : 1 }); },
   dept(d) {
     return (ctx, c) => {
@@ -321,7 +321,7 @@ const IM = {
   siteFor(ctx, c) { world.site(ctx, { k: 0, cx: -6 + c.p * 10, cy: -29, s: 24 + c.p * 5 }); },
   siteBack(ctx, c) {
     const e = E.inOutCubic(prog(c.ls, 0, 0.95 * 4 * P)), s = lerp(34, 10.8, e);
-    world.site(ctx, { k: 1, cx: 0, cy: lerp(10, 0, e), s });
+    (s <= 18 ? world.siteFast : world.site)(ctx, { k: 1, cx: 0, cy: lerp(10, 0, e), s });
     const [x, y] = toScreen(0, lerp(10, 0, e), s, 0, 12); disc(ctx, x, y, 9, C.red); ring(ctx, x, y, 16 + 10 * e, 2, rgba(C.red, 0.8));
   },
   numDots(ctx, c) {   // 1 300 points, one per company
@@ -367,8 +367,8 @@ S('BRANSJE-', 2, 'A', 'L', IM.rows, { sfx: 'thud', shake: 8 });
 S('KUNNSKAP.', 2, 'N', 'R', IM.rearwheel, { sfx: 'thud', shake: 10 });
 const KICK = 'BDO Bilbransjeanalysen 2025';
 S('1,7 %', 3, 'B', 'slam', IM.base, { ...num((c) => `${lerp(1.5, 1.7, E.outCubic(prog(c.ls, 0, 0.3))).toFixed(1).replace('.', ',')} %`), fitStr: '1,7 %', label: 'Driftsmargin merkeforhandlere 2024', kick: KICK, sfx: 'thud', shake: 10, hits: [[0.8, 'count', 'tick']], dy: -40 });
-S('2,5 %', 3, 'N', 'slam', IM.base, { ...num((c) => `${lerp(1.9, 2.5, E.outCubic(prog(c.ls, 0, 0.3))).toFixed(1).replace('.', ',')} %`), fitStr: '2,5 %', label: 'Bruktbilforhandlere 2024', kick: KICK, sfx: 'thud', shake: 10, hits: [[0.8, 'count', 'tick']], dy: -40 });
-S('1 300+', 3, 'A', 'slam', IM.numDots, { ...num((c) => NF(`${Math.round(lerp(880, 1300, E.outCubic(prog(c.ls, 0, 0.4)))).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}${c.ls > 0.4 ? '+' : ''}`)), fitStr: NF('1 300+'), numDots: true, label: 'Bedrifter analysert', kick: KICK, sfx: 'thud', shake: 10, hits: [[0.8, 'count', 'tick']], dy: -40 });
+S('2,5 %', 3, 'N', 'slam', IM.base, { ...num(() => '2,5 %'), fitStr: '2,5 %', label: 'Bruktbilforhandlere 2024', kick: KICK, sfx: 'thud', shake: 10, hits: [[0.8, 'count', 'tick']], dy: -40 });
+S('1 300+', 3, 'A', 'slam', IM.numDots, { ...num(() => NF('1 300+')), fitStr: NF('1 300+'), numDots: true, label: 'Bedrifter analysert', kick: KICK, sfx: 'thud', shake: 10, hits: [[0.8, 'count', 'tick']], dy: -40 });
 S('MØNSTRE.', 2, 'N', 'letters', IM.chartUp, { sfx: 'thud', shake: 8, hits: [[0.3, 'chart', 'whoosh', { len: 0.4, from: 400, to: 2400 }]] });
 S('MØNSTRE.', 1, 'A', 'slam', IM.chartZoom, { sfx: 'click', shake: 8 });
 S('SAMMENHENGER.', 2, 'B', 'L', (ctx, c) => IM.links(ctx, c), { sfx: 'thud', shake: 8 });
@@ -397,7 +397,7 @@ const SIZE = new Map();
 function wordGeom(ctx, sh) {
   const str = sh.fitStr || sh.word, key = str;
   if (!SIZE.has(key)) {
-    const size = sh.size || M.fitSize(ctx, str, 800, DISPLAY, sh.maxW || 1728, 420, -0.03);
+    const size = sh.size || M.fitSize(ctx, str, 800, DISPLAY, sh.maxW || 1560, 420, -0.03);
     const f = M.font(size, 800, DISPLAY), lay = M.layout(ctx, str, f, -0.03 * size);
     SIZE.set(key, { size, f, lay });
   }
@@ -488,7 +488,7 @@ M.film({
   fonts: [M.font(100, 800, DISPLAY), M.font(100, 300, DISPLAY), M.font(40, 500, MONO)],
   hits: HITS,
   samples: (t) => (t / P >= END ? 1 : (shotAt(t / P).samples ?? 4)),
-  async init() { await K.loadLogo(); },
+  async init() { await K.loadLogo(); const c = document.createElement('canvas').getContext('2d'); world.siteFast(c, { k: 0 }); world.siteFast(c, { k: 1 }); },
   draw(ctx, u, t) {
     if (u >= END) { endCard(ctx, u, t); return; }
     shot(ctx, Math.max(0, u), t, shotAt(u));

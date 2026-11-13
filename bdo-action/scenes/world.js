@@ -399,3 +399,24 @@ export function draw(ctx, t) {
 
 // ---- extra exports for the action cut
 export { EL, GROUND, DOT, carPlan, rooms, lot, DEPTS, B, LOT };
+
+// Cached raster of the whole site (built once per sheet tone), for shots that show the full plan
+// at s <= ~16: drawing 700 vector cars every frame costs ~45 ms in software canvas.
+const SITE_CACHE = {};
+const S0 = 16;
+export function siteFast(ctx, { k = 0, cx = 0, cy = 0, s = 10, alpha = 1 } = {}) {
+  if (alpha <= 0) return;
+  const key = k < 0.5 ? 0 : 1;
+  if (!SITE_CACHE[key]) {
+    const cv = document.createElement('canvas'); cv.width = 176 * S0; cv.height = 106 * S0;
+    const c = cv.getContext('2d');
+    c.save(); c.translate(cv.width / 2 - K.W / 2, cv.height / 2 - K.H / 2);
+    site(c, { k: key, cx: 0, cy: 0, s: S0, alpha: 1 }); c.restore();
+    SITE_CACHE[key] = cv;
+  }
+  const cv = SITE_CACHE[key], sc = s / S0;
+  ctx.save(); ctx.globalAlpha *= alpha; ctx.imageSmoothingQuality = 'high';
+  ctx.translate(K.W / 2 - cx * s, K.H / 2 - cy * s); ctx.scale(sc, sc);
+  ctx.drawImage(cv, -cv.width / 2, -cv.height / 2);
+  ctx.restore();
+}
